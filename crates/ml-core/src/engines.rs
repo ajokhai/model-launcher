@@ -72,7 +72,8 @@ pub fn estimate_gb(m: &Installed, s: &Settings) -> f64 {
             let weights = system_size(&m.weights);
             // q8 KV cache: about 75 KB per token for an 8B model, scaled by model size
             let kv = s.context_size as f64 * 7.5e-5 * (weights / 5.0).clamp(0.2, 3.0);
-            m.size_gb + kv + 0.4
+            // weights + KV cache + compute buffers + the capped prompt cache
+            m.size_gb + kv + 0.4 + 0.5
         }
         Kind::Image => m.size_gb * 1.3 + 1.2,
         // frames are decoded in tiles, so most of the cost is the weights plus the text encoder
@@ -262,7 +263,10 @@ impl Engines {
             .args(["-ngl", if s.use_gpu { "999" } else { "0" }])
             // flash attention plus an 8-bit KV cache halves the memory a long chat takes
             .args(["-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0"])
-            .args(["--jinja", "--parallel", "1"]);
+            .args(["--jinja", "--parallel", "1"])
+            // llama.cpp keeps old prompts in RAM (up to 8 GB by default); cap it so a long session
+            // can't grow a model past the budget. 512 MB still covers an agent's recent turns.
+            .args(["--cache-ram", "512"]);
         let child = spawn_logged(cmd, &format!("chat-{}", m.id))?;
         let pid = child.id().unwrap_or(0);
         if s.low_priority {

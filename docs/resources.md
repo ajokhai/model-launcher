@@ -23,7 +23,7 @@ Local models are memory hungry. Model Launcher keeps them inside limits you set 
 5. **Idle unload** frees a chat model after the idle time you picked.
 6. **Quitting frees everything**, including after a crash: on the next start, a model server left behind is stopped.
 
-Chat models also run with flash attention and an 8-bit KV cache, which roughly halves the memory a long conversation takes.
+Chat models also run with flash attention and an 8-bit KV cache, which roughly halves the memory a long conversation takes, and llama.cpp's prompt cache is capped at 512 MB (it defaults to 8 GB, enough on its own to push a model past a 16 GB Mac's budget).
 
 ## The fit badges
 

@@ -412,7 +412,7 @@ async fn catalog_list(State(core): State<Arc<Core>>) -> Json<Value> {
         .map(|m| {
             let size = m.size_gb();
             let need = match m.kind {
-                Kind::Chat => size + s.context_size as f64 * 7.5e-5 * (size / 5.0).clamp(0.2, 3.0) + 0.4,
+                Kind::Chat => size + s.context_size as f64 * 7.5e-5 * (size / 5.0).clamp(0.2, 3.0) + 0.9,
                 Kind::Image => size * 1.3 + 1.2,
                 Kind::Video => size * 1.2 + 1.5,
                 Kind::Speak => size + 0.6,
