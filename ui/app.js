@@ -15,7 +15,7 @@ async function api(path, opts = {}) {
   if (!r.ok) {
     let msg = `${r.status}`;
     try { msg = (await r.json()).error.message; } catch {}
-    throw new Error(msg);
+    throw Object.assign(new Error(msg), { status: r.status });
   }
   return opts.raw ? r : r.json();
 }
@@ -28,10 +28,12 @@ function toast(msg, err) {
   toast.t = setTimeout(() => (t.className = 'toast'), err ? 6000 : 3000);
 }
 
-function confirmDelete(title, text) {
+function confirmDelete(title, text, yes = 'Delete', danger = true) {
   return new Promise((resolve) => {
     $('modal-title').textContent = title;
     $('modal-text').textContent = text;
+    $('modal-yes').textContent = yes;
+    $('modal-yes').className = `btn ${danger ? 'danger' : 'primary'}`;
     $('modal').hidden = false;
     const done = (v) => { $('modal').hidden = true; resolve(v); };
     $('modal-yes').onclick = () => done(true);
@@ -139,7 +141,7 @@ function renderBanner() {
   if (rs.length) {
     html += `<div class="card dark loaded"><div class="loaded-head"><span class="live"></span><b>${rs.length} of ${max} loaded</b><span class="muted">Models stay loaded while they fit your RAM budget; the least recently used makes room.</span></div>
       ${rs.map((r) => `<div class="loaded-row"><span class="live ${r.ready ? '' : 'loading'}"></span>
-        <div style="flex:1"><b>${esc(r.name)}</b> <span class="muted">${r.ready ? '' : 'loading… · '}${gb(r.memory_gb)} · ${r.vision ? 'reads images · ' : ''}idle ${Math.floor(r.idle_secs / 60)} min</span></div>
+        <div style="flex:1"><b>${esc(r.name)}</b> <span class="muted">${r.ready ? '' : 'loading… · '}${gb(r.memory_gb)} · ${r.vision ? 'reads images · ' : ''}${r.forced ? 'over budget, run anyway · ' : ''}idle ${Math.floor(r.idle_secs / 60)} min</span></div>
         <button class="btn primary sm" onclick="openChat('${esc(r.id)}')" ${r.ready ? '' : 'disabled'}>Open chat</button>
         <button class="btn icon-only" onclick="unload('${esc(r.id)}')">Unload</button></div>`).join('')}</div>`;
   }
@@ -221,7 +223,20 @@ async function openChat(id) {
     await ensureEngine('chat');
     state.loading = id;
     render();
-    const r = await api('/api/launch', { body: { id } });
+    let r;
+    try {
+      r = await api('/api/launch', { body: { id } });
+    } catch (e) {
+      if (e.status !== 507) throw e;
+      // not enough RAM: offer to run it anyway
+      state.loading = null;
+      render();
+      const go = await confirmDelete('Run it anyway?', `${e.message.replace(/ (Raise|Close).*$/, '')}\n\nRunning anyway unloads your other chat models and puts what doesn't fit on the GPU onto the CPU. It will work, but it can be slow, and other apps may slow down while it runs. Unload it when you're done.`, 'Run anyway', false);
+      if (!go) return refresh();
+      state.loading = id;
+      render();
+      r = await api('/api/launch', { body: { id, force: true } });
+    }
     state.loading = null;
     if (tauri) await tauri.invoke('open_chat', { url: r.url, title: r.name });
     else window.open(r.url);

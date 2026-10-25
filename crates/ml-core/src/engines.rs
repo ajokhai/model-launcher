@@ -98,7 +98,21 @@ pub struct Running {
     pub idle_secs: u64,
     pub ready: bool,
     pub vision: bool,
+    /// Started with "Run anyway": past the RAM budget, so the watchdog leaves it alone.
+    pub forced: bool,
 }
+
+/// A model was refused for lack of memory; the app offers to run it anyway.
+#[derive(Debug)]
+pub struct NotEnoughMemory(pub String);
+
+impl std::fmt::Display for NotEnoughMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NotEnoughMemory {}
 
 struct ChatServer {
     model: Installed,
@@ -109,6 +123,7 @@ struct ChatServer {
     need_gb: f64,
     last_used: Instant,
     ready: bool,
+    forced: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -171,6 +186,7 @@ impl Engines {
                 idle_secs: c.last_used.elapsed().as_secs(),
                 ready: c.ready,
                 vision: c.model.projector.is_some(),
+                forced: c.forced,
             })
             .collect();
         v.sort_by_key(|r| r.idle_secs);
@@ -203,6 +219,13 @@ impl Engines {
     /// Makes sure `m` is loaded and returns its port. Other loaded models stay loaded while there's
     /// room; when there isn't, the least recently used are unloaded first.
     pub async fn ensure_chat(&self, m: &Installed) -> Result<u16> {
+        self.load_chat(m, false).await
+    }
+
+    /// Loads a chat model. `force` skips the memory checks ("Run anyway"): every other chat model is
+    /// unloaded first, and llama.cpp puts on the GPU only the layers that fit, the rest on the CPU.
+    /// It runs slowly once macOS starts swapping, but it runs.
+    pub async fn load_chat(&self, m: &Installed, force: bool) -> Result<u16> {
         if m.kind != Kind::Chat {
             bail!("{} isn't a chat model", m.name);
         }
@@ -219,17 +242,18 @@ impl Engines {
 
         let s = self.settings.read().await.clone();
         let need = estimate_gb(m, &s);
-        if need > s.memory_budget_gb {
-            bail!(
+        if need > s.memory_budget_gb && !force {
+            return Err(NotEnoughMemory(format!(
                 "{} needs about {:.1} GB, more than your {:.0} GB RAM budget. Raise the budget in Settings or pick a smaller model.",
                 m.name, need, s.memory_budget_gb
-            );
+            ))
+            .into());
         }
         // make room: unload least recently used models until this one fits the budget and the limit
         loop {
             let mut c = self.chat.lock().await;
             let used: f64 = c.iter().map(|c| c.need_gb).sum();
-            let fits = used + need <= s.memory_budget_gb && (c.len() as u32) < s.effective_max_loaded();
+            let fits = !force && used + need <= s.memory_budget_gb && (c.len() as u32) < s.effective_max_loaded();
             if fits || c.is_empty() {
                 break;
             }
@@ -241,11 +265,15 @@ impl Engines {
             stop_child(old.child).await;
         }
         let free = system::available_memory_gb() + self.current_job().map(|j| j.memory_gb).unwrap_or(0.0);
-        if need > free + 1.0 {
-            bail!(
+        if need > free + 1.0 && !force {
+            return Err(NotEnoughMemory(format!(
                 "{} needs about {:.1} GB but only {:.1} GB is free right now. Close some apps or unload a model, then try again.",
                 m.name, need, free
-            );
+            ))
+            .into());
+        }
+        if force && need > free.min(s.memory_budget_gb) {
+            self.note(format!("Running {} anyway: it needs about {:.1} GB with {:.1} GB free, so expect it to be slow", m.name, need, free));
         }
 
         let bin = Engine::LlamaServer.path().ok_or_else(|| anyhow!("llama.cpp isn't installed yet (Settings › Engines)"))?;
@@ -261,7 +289,8 @@ impl Engines {
         cmd.args(["--host", "127.0.0.1", "--port", &port.to_string()])
             .args(["-c", &s.context_size.to_string()])
             .args(["-t", &s.effective_threads().to_string()])
-            .args(["-ngl", if s.use_gpu { "999" } else { "0" }])
+            // forced loads let llama.cpp fit as many layers on the GPU as memory allows
+            .args(["-ngl", if !s.use_gpu { "0" } else if force { "auto" } else { "999" }])
             // flash attention plus an 8-bit KV cache halves the memory a long chat takes
             .args(["-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0"])
             .args(["--jinja", "--parallel", "1"])
@@ -286,7 +315,7 @@ impl Engines {
         self.note(format!("Loading {} ({:.1} GB expected)", m.name, need));
         {
             let mut c = self.chat.lock().await;
-            c.push(ChatServer { model: m.clone(), child, port, pid, need_gb: need, last_used: Instant::now(), ready: false });
+            c.push(ChatServer { model: m.clone(), child, port, pid, need_gb: need, last_used: Instant::now(), ready: false, forced: force });
             Self::write_pids(&c);
         }
         if let Err(e) = self.wait_ready(port).await {
@@ -356,13 +385,13 @@ impl Engines {
 
     /// Unloads and loads again every chat model, e.g. after Internet access is switched.
     pub async fn reload_chat(&self) {
-        let models: Vec<Installed> = self.chat.lock().await.iter().map(|c| c.model.clone()).collect();
+        let models: Vec<(Installed, bool)> = self.chat.lock().await.iter().map(|c| (c.model.clone(), c.forced)).collect();
         if models.is_empty() {
             return;
         }
         self.stop_chat("reloading for the new Internet access setting").await;
-        for m in models {
-            if let Err(e) = self.ensure_chat(&m).await {
+        for (m, forced) in models {
+            if let Err(e) = self.load_chat(&m, forced).await {
                 self.note(format!("Couldn't reload {}: {e}", m.name));
             }
         }
@@ -392,7 +421,8 @@ impl Engines {
             bail!("{} needs about {:.1} GB, more than your {:.0} GB RAM budget.", m.name, need, s.memory_budget_gb);
         }
         loop {
-            let running = self.running().await;
+            // a model run anyway is past the budget by choice, so only the others are policed
+            let running: Vec<Running> = self.running().await.into_iter().filter(|r| !r.forced).collect();
             let chat_gb: f64 = running.iter().map(|r| r.memory_gb).sum();
             match running.last() {
                 Some(lru) if chat_gb + need > s.memory_budget_gb => {

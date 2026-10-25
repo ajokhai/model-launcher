@@ -24,7 +24,7 @@ use tokio::process::Command;
 
 use crate::catalog::{self, Kind};
 use crate::download;
-use crate::engines::{estimate_gb, Engine};
+use crate::engines::{estimate_gb, Engine, NotEnoughMemory};
 use crate::library::{self, Installed};
 use crate::settings::{outputs_dir, Settings};
 use crate::system;
@@ -35,13 +35,17 @@ pub struct ApiError(StatusCode, String);
 
 impl<E: Into<anyhow::Error>> From<E> for ApiError {
     fn from(e: E) -> Self {
-        ApiError(StatusCode::BAD_REQUEST, format!("{:#}", e.into()))
+        let e = e.into();
+        // 507 tells the app it can offer "Run anyway"
+        let code = if e.is::<NotEnoughMemory>() { StatusCode::INSUFFICIENT_STORAGE } else { StatusCode::BAD_REQUEST };
+        ApiError(code, format!("{e:#}"))
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.0, Json(json!({ "error": { "message": self.1 } }))).into_response()
+        let kind = if self.0 == StatusCode::INSUFFICIENT_STORAGE { "insufficient_memory" } else { "invalid_request_error" };
+        (self.0, Json(json!({ "error": { "message": self.1, "type": kind } }))).into_response()
     }
 }
 
@@ -438,9 +442,17 @@ struct IdReq {
     id: String,
 }
 
-async fn launch(State(core): State<Arc<Core>>, Json(req): Json<IdReq>) -> R<Json<Value>> {
+#[derive(Deserialize)]
+struct LaunchReq {
+    id: String,
+    /// Load even past the RAM budget and free memory ("Run anyway").
+    #[serde(default)]
+    force: bool,
+}
+
+async fn launch(State(core): State<Arc<Core>>, Json(req): Json<LaunchReq>) -> R<Json<Value>> {
     let m = resolve(&core, Some(&req.id), Kind::Chat).await?;
-    let port = core.engines.ensure_chat(&m).await?;
+    let port = core.engines.load_chat(&m, req.force).await?;
     Ok(Json(json!({ "id": m.id, "name": m.name, "port": port, "url": format!("http://127.0.0.1:{port}/") })))
 }
 

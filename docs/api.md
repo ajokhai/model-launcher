@@ -47,7 +47,7 @@ These are what the app's window and the MCP server use.
 | `GET /api/status` | System memory and disk, settings, the loaded model and its memory, the running job, recent activity, engines, downloads |
 | `GET /api/library` | Installed models, with estimated memory need and fit |
 | `GET /api/catalog` | Downloadable models, with fit and whether they're installed |
-| `POST /api/launch {"id"}` | Load a chat model; returns its chat page URL |
+| `POST /api/launch {"id","force"?}` | Load a chat model; returns its chat page URL. Without enough RAM it answers 507 (`insufficient_memory`); `"force": true` loads it anyway, past the budget |
 | `POST /api/stop {"id"?}` | Unload one chat model, or all of them |
 | `POST /api/import/url {"name","kind","urls"}` | Download a model from any links into `~/Models` |
 | `POST /api/import/file {"name","kind","paths"}` | Move model files already on this Mac into `~/Models` |

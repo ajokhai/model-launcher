@@ -241,3 +241,4 @@ a { color: var(--text); text-decoration: underline; text-decoration-color: var(-
 .add-card { display: flex; align-items: center; gap: 16px; margin-top: 18px; padding: 16px 18px; border: 1.5px dashed var(--line); border-radius: 12px; }
 .add-card > div { flex: 1; }
 .add-card .muted { margin-top: 3px; }
+#modal-text { white-space: pre-line; }
