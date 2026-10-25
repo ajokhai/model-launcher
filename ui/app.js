@@ -95,6 +95,7 @@ $('tabs').onclick = (e) => {
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('on', p.id === 'page-' + tab));
   if (tab === 'connect') renderConnect();
   state.tab = tab;
+  if (tab === 'support') api('/api/support').then((s) => { $('support-title').textContent = s.label; $('support-btn').textContent = s.label; $('support-btn').dataset.link = s.url; }).catch(() => {});
   if (tab === 'bench') refreshBench();
 };
 $('filters').onclick = (e) => {

@@ -75,6 +75,32 @@ pub async fn fetch(url: &str) -> Result<Value> {
     Ok(json!({ "url": final_url, "title": title, "text": text, "truncated": truncated }))
 }
 
+/// The label on the support button at buymeamalt.com/@ajokhai ("Buy me a Beer"), so the app's
+/// Support page says whatever Josh set it to there. None when the page can't be read.
+pub async fn support_label(url: &str) -> Option<String> {
+    let html = client().ok()?.get(url).send().await.ok()?.text().await.ok()?;
+    let (_, rest) = html.split_once("support-button")?;
+    let inner = rest.split_once('>')?.1.split("</button>").next()?;
+    // the first run of text inside the button is the label; the price follows in its own span
+    let mut label = String::new();
+    let mut in_tag = false;
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                in_tag = true;
+                if !label.trim().is_empty() {
+                    break;
+                }
+            }
+            '>' => in_tag = false,
+            _ if !in_tag => label.push(c),
+            _ => {}
+        }
+    }
+    let label = decode_entities(label.trim());
+    (!label.is_empty() && label.len() < 60).then_some(label)
+}
+
 fn private_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v) => v.is_private() || v.is_loopback() || v.is_link_local() || v.is_unspecified(),
@@ -225,6 +251,12 @@ mod tests {
         assert_eq!(real_url("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa&rut=x"), "https://example.com/a");
         let page = readable("<html><head><style>x{}</style></head><body><nav>menu</nav><h1>Title</h1><p>Hello <i>there</i></p><script>bad()</script></body></html>");
         assert_eq!(page, "Title\nHello there");
+    }
+
+    #[tokio::test]
+    #[ignore = "uses the network"]
+    async fn reads_the_support_button() {
+        println!("{:?}", support_label("https://buymeamalt.com/@ajokhai").await);
     }
 
     #[tokio::test]

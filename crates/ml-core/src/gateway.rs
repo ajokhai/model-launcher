@@ -95,6 +95,7 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/api/settings", post(update_settings))
         .route("/api/engines/install", post(install_engine))
         .route("/api/reveal", post(reveal))
+        .route("/api/support", get(support))
         .route("/api/update", get(update_status))
         .route("/api/update/check", post(update_check))
         .route("/api/update/install", post(update_install))
@@ -612,6 +613,23 @@ async fn save_settings(core: &Arc<Core>, patch: Value) -> anyhow::Result<Setting
         tokio::spawn(async move { core.engines.reload_chat().await });
     }
     Ok(new)
+}
+
+const SUPPORT_URL: &str = "https://buymeamalt.com/@ajokhai";
+
+/// The support link and its button label, read from the page (cached for an hour).
+async fn support() -> Json<Value> {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, String)>> = std::sync::Mutex::new(None);
+    let cached = CACHE.lock().unwrap().clone().filter(|(t, _)| t.elapsed() < std::time::Duration::from_secs(3600));
+    let label = match cached {
+        Some((_, l)) => l,
+        None => {
+            let l = web::support_label(SUPPORT_URL).await.unwrap_or_else(|| "Buy me a drink".into());
+            *CACHE.lock().unwrap() = Some((std::time::Instant::now(), l.clone()));
+            l
+        }
+    };
+    Json(json!({ "url": SUPPORT_URL, "label": label }))
 }
 
 async fn update_status(State(core): State<Arc<Core>>) -> Json<Value> {

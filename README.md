@@ -108,7 +108,7 @@ Model weights aren't part of this repo and keep their own licenses. Check them b
 
 Model Launcher is free and open source. If it's useful to you:
 
-- [Buy me a malt](https://buymeamalt.com/@ajokhai) (a one-off tip)
+- [Buy me a drink](https://buymeamalt.com/@ajokhai) (a one-off tip)
 - Star this repo, and [Computer Use](https://github.com/ajokhai/computer-use-lite) too
 - Run the benchmark on your machine and share the result
 
