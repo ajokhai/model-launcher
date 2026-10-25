@@ -144,20 +144,57 @@ impl Downloads {
         Ok(())
     }
 
+    /// Downloads one file to `dest`, resuming a partial `.part` from where it stopped and retrying
+    /// dropped connections (up to 8 times, with a growing pause), so a big model survives flaky Wi-Fi.
     async fn fetch(&self, client: &reqwest::Client, id: &str, url: &str, dest: &Path, before_gb: f64) -> Result<u64> {
         let part = dest.with_extension("part");
-        let resp = client.get(url).send().await?.error_for_status()?;
+        let mut tries = 0;
+        loop {
+            match self.fetch_once(client, id, url, &part, before_gb).await {
+                Ok(()) => break,
+                Err(e) if e.to_string() == "Cancelled" => {
+                    let _ = tokio::fs::remove_file(&part).await;
+                    return Err(e);
+                }
+                Err(e) if tries < 8 => {
+                    tries += 1;
+                    self.set(id, |p| p.error = None);
+                    eprintln!("download {id}: {e:#}; retry {tries} of 8");
+                    tokio::time::sleep(std::time::Duration::from_secs(2 * tries)).await;
+                }
+                Err(e) => return Err(e.context("the download kept dropping; press Download to resume")),
+            }
+        }
+        let got = tokio::fs::metadata(&part).await?.len();
+        tokio::fs::rename(&part, dest).await?;
+        Ok(got)
+    }
+
+    async fn fetch_once(&self, client: &reqwest::Client, id: &str, url: &str, part: &Path, before_gb: f64) -> Result<()> {
+        let have = tokio::fs::metadata(part).await.map(|m| m.len()).unwrap_or(0);
+        let mut req = client.get(url);
+        if have > 0 {
+            req = req.header(reqwest::header::RANGE, format!("bytes={have}-"));
+        }
+        let resp = req.send().await?;
+        if resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+            return Ok(()); // already complete
+        }
+        let resp = resp.error_for_status()?;
+        let resumed = resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+        let mut got: u64 = if resumed { have } else { 0 };
         if let Some(len) = resp.content_length() {
-            let need = before_gb + len as f64 / GB;
+            let need = before_gb + (got + len) as f64 / GB;
             self.set(id, |p| if p.total_gb < need { p.total_gb = need });
         }
-        let mut file = tokio::fs::File::create(&part).await?;
+        let mut file = if resumed {
+            tokio::fs::OpenOptions::new().append(true).open(part).await?
+        } else {
+            tokio::fs::File::create(part).await?
+        };
         let mut stream = resp.bytes_stream();
-        let mut got: u64 = 0;
         while let Some(chunk) = stream.next().await {
             if self.cancelled.lock().unwrap().iter().any(|c| c == id) {
-                drop(file);
-                let _ = tokio::fs::remove_file(&part).await;
                 bail!("Cancelled");
             }
             let chunk = chunk?;
@@ -168,9 +205,7 @@ impl Downloads {
             }
         }
         file.flush().await?;
-        drop(file);
-        tokio::fs::rename(&part, dest).await?;
-        Ok(got)
+        Ok(())
     }
 }
 
