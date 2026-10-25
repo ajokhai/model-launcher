@@ -1,0 +1,12 @@
+[package]
+name = "ml-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[[bin]]
+name = "model-launcher-mcp"
+path = "src/main.rs"

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Model Launcher</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="top" data-tauri-drag-region>
+    <div class="brand" data-tauri-drag-region>
+      <img src="icon.png" alt="" class="logo">
+      <span>Model Launcher</span>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="library" class="on">Library</button>
+      <button data-tab="discover">Discover</button>
+      <button data-tab="studio">Studio</button>
+      <button data-tab="connect">Connect</button>
+      <button data-tab="settings">Settings</button>
+      <button data-tab="help">Help</button>
+    </nav>
+    <div class="meter" id="meter" title="Memory used by models / your budget">
+      <div class="meter-bar"><i id="meter-fill"></i></div>
+      <span id="meter-text">–</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="banner"></section>
+
+    <!-- Library -->
+    <section class="page on" id="page-library">
+      <div class="page-head">
+        <div>
+          <h1>Your models</h1>
+          <p class="sub">Everything lives in <a href="#" id="open-models">~/Models</a>, one folder per model. Launch one and it swaps in; only one chat model is loaded at a time.</p>
+        </div>
+      </div>
+      <div id="library"></div>
+    </section>
+
+    <!-- Discover -->
+    <section class="page" id="page-discover">
+      <div class="page-head">
+        <div>
+          <h1>Discover</h1>
+          <p class="sub">Open models picked to run well on a Mac. The badge says how each fits your memory budget.</p>
+        </div>
+        <div class="filters" id="filters">
+          <button data-kind="all" class="on">All</button>
+          <button data-kind="chat">Chat</button>
+          <button data-kind="voice">Voice</button>
+          <button data-kind="image">Image</button>
+        </div>
+      </div>
+      <div class="grid" id="catalog"></div>
+    </section>
+
+    <!-- Studio -->
+    <section class="page" id="page-studio">
+      <div class="page-head"><div><h1>Studio</h1><p class="sub">Try voice and image models right here. The same features are in the API and MCP.</p></div></div>
+      <div class="studio">
+        <div class="card">
+          <div class="card-title"><span class="dot violet"></span>Speak</div>
+          <p class="hint">Text to speech with a local voice model.</p>
+          <textarea id="speak-text" rows="4" placeholder="Type something to say…">Hello! I'm running entirely on this Mac.</textarea>
+          <div class="row"><select id="speak-model"></select><button class="btn primary" id="speak-go">Speak</button></div>
+          <audio id="speak-audio" controls hidden></audio>
+          <p class="out" id="speak-out"></p>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="dot teal"></span>Transcribe</div>
+          <p class="hint">Speech to text. Drop or choose an audio file (wav, mp3, m4a…).</p>
+          <label class="drop" id="drop">
+            <input type="file" id="tr-file" accept="audio/*">
+            <span id="drop-text">Choose an audio file</span>
+          </label>
+          <div class="row"><select id="tr-model"></select><button class="btn primary" id="tr-go">Transcribe</button></div>
+          <p class="out" id="tr-out"></p>
+        </div>
+        <div class="card wide">
+          <div class="card-title"><span class="dot orange"></span>Image</div>
+          <p class="hint">Describe a picture. Turbo models take a few seconds.</p>
+          <div class="row">
+            <input id="img-prompt" placeholder="A cozy cabin in snowy mountains at dusk, warm light in the windows">
+            <select id="img-size"><option>512x512</option><option>768x512</option><option>512x768</option><option>768x768</option></select>
+            <select id="img-model"></select>
+            <button class="btn primary" id="img-go">Create</button>
+          </div>
+          <p class="out" id="img-out"></p>
+          <div class="gallery" id="gallery"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Connect -->
+    <section class="page" id="page-connect">
+      <div class="page-head"><div><h1>Connect</h1><p class="sub">Use your local models from other apps, through an OpenAI-compatible API or MCP.</p></div></div>
+      <div class="card">
+        <div class="card-title"><span class="dot orange"></span>API</div>
+        <p class="hint">Point any OpenAI SDK or app at this base URL. Any API key works; it never leaves this Mac. Naming a model swaps it in.</p>
+        <div class="copy"><code id="api-url">http://127.0.0.1:11500/v1</code><button class="btn ghost" data-copy="api-url">Copy</button></div>
+        <pre id="api-example"></pre>
+        <p class="hint">Endpoints: <code>/v1/models</code>, <code>/v1/chat/completions</code> (streaming too), <code>/v1/audio/transcriptions</code>, <code>/v1/audio/speech</code>, <code>/v1/images/generations</code>.</p>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="dot violet"></span>MCP</div>
+        <p class="hint">Gives Claude, Cursor and other MCP apps the tools <code>chat</code>, <code>transcribe</code>, <code>speak</code>, <code>generate_image</code>, <code>list_models</code>, <code>load_model</code> and <code>unload_model</code>.</p>
+        <div id="clients" class="clients"></div>
+        <p class="hint">Or add it by hand:</p>
+        <pre id="mcp-config"></pre>
+        <button class="btn ghost" data-copy="mcp-config">Copy config</button>
+        <p class="hint">Going the other way, the chat window can use MCP servers too: open a model's chat and use its <b>MCP</b> panel to add one.</p>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="page" id="page-settings">
+      <div class="page-head"><div><h1>Settings</h1><p class="sub">How much of this Mac models may use. Changes apply to the next model you load.</p></div></div>
+      <div class="settings">
+        <div class="card">
+          <div class="card-title"><span class="dot orange"></span>Memory</div>
+          <label class="field">
+            <span>Memory budget <b id="v-budget"></b></span>
+            <input type="range" id="s-budget" min="1" max="14" step="1">
+            <small>The most memory models may use together. Bigger launches are refused, and a model that grows past it is stopped. <span id="ram-note"></span></small>
+          </label>
+          <label class="field">
+            <span>Context size <b id="v-ctx"></b></span>
+            <select id="s-ctx"><option value="2048">2,048 tokens</option><option value="4096">4,096 tokens</option><option value="8192">8,192 tokens</option><option value="16384">16,384 tokens</option><option value="32768">32,768 tokens</option></select>
+            <small>How much of a conversation a chat model remembers. Each doubling costs more memory.</small>
+          </label>
+          <label class="field">
+            <span>Unload when idle</span>
+            <select id="s-idle"><option value="0">Never</option><option value="5">After 5 minutes</option><option value="10">After 10 minutes</option><option value="30">After 30 minutes</option><option value="60">After 1 hour</option></select>
+            <small>Frees the memory of a chat model nobody is using. It reloads on the next message.</small>
+          </label>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="dot teal"></span>Speed and throttling</div>
+          <label class="field">
+            <span>CPU threads <b id="v-threads"></b></span>
+            <input type="range" id="s-threads" min="0" max="10" step="1">
+            <small>0 picks automatically (all cores but two). Fewer threads leave more for your other apps.</small>
+          </label>
+          <label class="toggle"><input type="checkbox" id="s-gpu"><span>Use the GPU (Metal)</span></label>
+          <small class="note">Much faster. Turn off to keep the GPU free for games or video work.</small>
+          <label class="toggle"><input type="checkbox" id="s-low"><span>Low priority</span></label>
+          <small class="note">Models yield the CPU to whatever you're doing, so the Mac never feels stuck.</small>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="dot violet"></span>Engines</div>
+          <p class="hint">The open-source programs that run models.</p>
+          <div id="engines"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="dot gray"></span>Activity</div>
+          <ul id="events" class="events"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Help -->
+    <section class="page" id="page-help">
+      <div class="page-head"><div><h1>Help</h1><p class="sub">Quick answers. The full docs are on <a href="#" data-link="https://github.com/ajokhai/model-launcher/tree/main/docs">GitHub</a>.</p></div></div>
+      <div class="help">
+        <details open><summary>Getting started</summary>
+          <ol><li>Open <b>Discover</b> and download a model marked <span class="badge great">Runs great</span>.</li>
+          <li>In <b>Library</b>, press <b>Chat</b>. The model loads and a chat window opens.</li>
+          <li>For voice and images, get a Whisper, OuteTTS or SD Turbo model and try it in <b>Studio</b>.</li></ol>
+          <p>Engines are installed for you the first time they're needed (Settings › Engines).</p></details>
+        <details><summary>Where are my models?</summary>
+          <p>All in <code>~/Models</code>: <code>Chat</code>, <code>Voice</code> and <code>Image</code>, with one folder per model. To add a model from elsewhere, put its files in a new folder there (for example <code>~/Models/Chat/My Model/</code>). A <code>.gguf</code> plus an optional <code>mmproj-*.gguf</code> makes a chat model; a <code>ggml-*.bin</code> in Voice is a Whisper model. To remove one, use the trash button or delete its folder.</p></details>
+        <details><summary>How does memory management work?</summary>
+          <p>You set a memory budget. Before loading, Model Launcher estimates what a model needs and refuses it if that's over the budget or more than is free. While it runs, a watchdog measures real memory every two seconds and stops anything that grows past the budget. Only one chat model is loaded at a time; voice and image jobs run one at a time and may unload the chat model to make room. Idle chat models unload on their own.</p></details>
+        <details><summary>What do the fit badges mean?</summary>
+          <p><span class="badge great">Runs great</span> uses under 75% of your budget. <span class="badge ok">Fits</span> is within budget. <span class="badge over">Over budget</span> means your Mac could run it if you raise the budget. <span class="badge too">Too big</span> needs more memory than this Mac has.</p></details>
+        <details><summary>My Mac feels slow while a model runs</summary>
+          <p>In Settings, lower <b>CPU threads</b>, keep <b>Low priority</b> on, lower <b>Context size</b>, or pick a smaller model. Quitting Model Launcher always frees all model memory.</p></details>
+        <details><summary>Using models from other apps</summary>
+          <p>See <b>Connect</b>. Any OpenAI-compatible app can use <code>http://127.0.0.1:11500/v1</code>. MCP apps like Claude and Cursor can be connected with one click. Only this Mac can reach the API, and web pages can't.</p></details>
+        <details><summary>A model won't load</summary>
+          <p>Check Settings › Activity for the reason. Logs are in <code>~/Library/Application Support/Model Launcher/logs</code>. Make sure the engine shows as installed in Settings › Engines.</p></details>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+  <div class="modal" id="modal" hidden>
+    <div class="modal-card">
+      <h3 id="modal-title"></h3>
+      <p id="modal-text"></p>
+      <div class="row end"><button class="btn ghost" id="modal-no">Cancel</button><button class="btn danger" id="modal-yes">Delete</button></div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

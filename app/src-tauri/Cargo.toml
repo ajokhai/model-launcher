@@ -1,0 +1,15 @@
+[package]
+name = "model-launcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Launch open-source chat, voice and image models on your Mac"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+ml-core = { path = "../../crates/ml-core" }
+tauri = { version = "2", features = [] }
+serde_json.workspace = true
+tokio.workspace = true
