@@ -26,6 +26,8 @@ Download the latest `Model Launcher.dmg` from [Releases](https://github.com/ajok
 
 The first time a model needs an engine, Model Launcher installs it: llama.cpp and whisper.cpp through [Homebrew](https://brew.sh), and stable-diffusion.cpp from its official release.
 
+**Linux (preview):** download the `.deb` (Ubuntu, Debian) or the `.AppImage` (any distro) from the same page. Engines come from the official llama.cpp, whisper.cpp and stable-diffusion.cpp releases: the Vulkan builds when your GPU supports Vulkan (NVIDIA, AMD or Intel), the CPU builds otherwise. Voice input needs `ffmpeg`, and the file picker uses `zenity` or `kdialog`. Settings, engines and logs live in `~/.local/share/Model Launcher`, and models in `~/Models` as on the Mac. The RAM budget covers system RAM; a separate GPU's video memory is managed by llama.cpp. The Linux build is new, so please [open an issue](https://github.com/ajokhai/model-launcher/issues) if something's off.
+
 ## Use it from other apps
 
 **API** (OpenAI-compatible, on this Mac only):

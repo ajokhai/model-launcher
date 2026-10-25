@@ -128,7 +128,8 @@ impl Settings {
     }
 }
 
-/// ~/Library/Application Support/Model Launcher: settings, engines, logs and outputs (never models).
+/// ~/Library/Application Support/Model Launcher (~/.local/share/Model Launcher on Linux): settings,
+/// engines, logs and outputs (never models).
 pub fn support_dir() -> PathBuf {
     dirs::data_dir().unwrap_or_default().join("Model Launcher")
 }

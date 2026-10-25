@@ -40,11 +40,30 @@ fn open_url(url: String) -> Result<(), String> {
     if !url.starts_with("https://") {
         return Err("only https links".into());
     }
-    std::process::Command::new("/usr/bin/open").arg(url).status().map_err(|e| e.to_string())?;
+    let opener = if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" };
+    std::process::Command::new(opener).arg(url).status().map_err(|e| e.to_string())?;
     Ok(())
 }
 
+/// Lets the person pick model files with the system file dialog; returns their paths.
+#[cfg(target_os = "linux")]
+#[tauri::command]
+fn pick_files() -> Vec<String> {
+    // zenity (GNOME and most desktops) or kdialog (KDE)
+    let tries: [(&str, &[&str]); 2] = [
+        ("zenity", &["--file-selection", "--multiple", "--separator=\n", "--title=Choose model files (.gguf, .bin or .safetensors)"]),
+        ("kdialog", &["--getopenfilename", ".", "--multiple", "--separate-output"]),
+    ];
+    for (cmd, args) in tries {
+        if let Ok(o) = std::process::Command::new(cmd).args(args).output() {
+            return String::from_utf8_lossy(&o.stdout).lines().filter(|l| !l.is_empty()).map(str::to_string).collect();
+        }
+    }
+    Vec::new()
+}
+
 /// Lets the person pick model files with the standard macOS file dialog; returns their paths.
+#[cfg(target_os = "macos")]
 #[tauri::command]
 fn pick_files() -> Vec<String> {
     let script = r#"set fs to choose file with prompt "Choose model files (.gguf, .bin or .safetensors)" with multiple selections allowed
@@ -85,7 +104,11 @@ fn mcp_info() -> Value {
 fn clients() -> Vec<(&'static str, &'static str, PathBuf)> {
     let home: PathBuf = std::env::var_os("HOME").map(Into::into).unwrap_or_default();
     vec![
-        ("claude_desktop", "Claude", home.join("Library/Application Support/Claude/claude_desktop_config.json")),
+        ("claude_desktop", "Claude", if cfg!(target_os = "macos") {
+            home.join("Library/Application Support/Claude/claude_desktop_config.json")
+        } else {
+            home.join(".config/Claude/claude_desktop_config.json")
+        }),
         ("claude_code", "Claude Code", home.join(".claude.json")),
         ("cursor", "Cursor", home.join(".cursor/mcp.json")),
         ("windsurf", "Windsurf", home.join(".codeium/windsurf/mcp_config.json")),
@@ -151,13 +174,16 @@ fn main() {
         .expect("Model Launcher failed to start");
 
     app.run(|handle, event| match event {
-        // closing the main window hides it; the app (and a loaded model) keeps running in the Dock
+        // closing the main window hides it; the app (and a loaded model) keeps running in the Dock.
+        // Linux has no Dock to bring it back from, so there closing it quits as usual.
+        #[cfg(target_os = "macos")]
         RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {
             api.prevent_close();
             if let Some(w) = handle.get_webview_window("main") {
                 let _ = w.hide();
             }
         }
+        #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => {
             if let Some(w) = handle.get_webview_window("main") {
                 let _ = w.show();

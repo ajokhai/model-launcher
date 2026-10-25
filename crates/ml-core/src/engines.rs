@@ -52,9 +52,9 @@ impl Engine {
         }
     }
 
-    /// Where it's found: Model Launcher's own engines folder first, then Homebrew.
+    /// Where it's found: Model Launcher's own engines folder first, then Homebrew or the system.
     pub fn path(self) -> Option<PathBuf> {
-        [engines_dir(), "/opt/homebrew/bin".into(), "/usr/local/bin".into()]
+        [engines_dir(), "/opt/homebrew/bin".into(), "/usr/local/bin".into(), "/usr/bin".into()]
             .into_iter()
             .map(|d| d.join(self.binary()))
             .find(|p| p.is_file())
@@ -560,6 +560,9 @@ fn web_tools() -> Option<PathBuf> {
 fn spawn_logged(mut cmd: Command, label: &str) -> Result<Child> {
     let log = std::fs::File::create(logs_dir().join(format!("{label}.log"))).context("can't write the log")?;
     cmd.stdout(Stdio::from(log.try_clone()?)).stderr(Stdio::from(log)).kill_on_drop(true);
+    // Linux release builds ship their libraries next to the binaries
+    #[cfg(target_os = "linux")]
+    cmd.env("LD_LIBRARY_PATH", engines_dir());
     cmd.spawn().context("couldn't start the engine")
 }
 

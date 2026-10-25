@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "targets": ["deb", "appimage"],
+    "shortDescription": "Launch open-source models on your computer",
+    "externalBin": ["binaries/model-launcher-mcp"],
+    "linux": {
+      "deb": { "depends": ["ffmpeg"] }
+    }
+  }
+}

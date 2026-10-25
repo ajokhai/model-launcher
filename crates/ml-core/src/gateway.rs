@@ -198,13 +198,20 @@ async fn transcribe(State(core): State<Arc<Core>>, mut form: Multipart) -> R<Jso
     let ext = fname.rsplit_once('.').map(|(_, e)| e).unwrap_or("bin");
     let input = out_path(ext);
     std::fs::write(&input, &audio)?;
-    // whisper wants 16 kHz mono WAV; macOS's own converter handles mp3, m4a, wav, aiff and more
+    // whisper wants 16 kHz mono WAV; macOS's own converter (ffmpeg on Linux) handles mp3, m4a,
+    // wav, aiff and more
     let wav = input.with_extension("16k.wav");
+    #[cfg(target_os = "macos")]
     let st = Command::new("/usr/bin/afconvert").arg("-f").arg("WAVE").arg("-d").arg("LEI16@16000").arg("-c").arg("1")
-        .arg(&input).arg(&wav).status().await?;
+        .arg(&input).arg(&wav).status().await;
+    #[cfg(target_os = "linux")]
+    let st = Command::new("ffmpeg").args(["-loglevel", "error", "-y", "-i"]).arg(&input).args(["-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le"])
+        .arg(&wav).status().await;
     let _ = std::fs::remove_file(&input);
-    if !st.success() {
-        return Err(anyhow!("couldn't read that audio file").into());
+    match st {
+        Ok(st) if st.success() => {}
+        Ok(_) => return Err(anyhow!("couldn't read that audio file").into()),
+        Err(_) => return Err(anyhow!("converting audio needs ffmpeg; install it (for example: sudo apt install ffmpeg)").into()),
     }
     let base = wav.with_extension("");
     let mut cmd = Command::new(engine_bin(Engine::WhisperCli)?);
@@ -690,6 +697,10 @@ async fn reveal(State(core): State<Arc<Core>>, Json(req): Json<RevealReq>) -> R<
         (_, Some(p)) => PathBuf::from(p),
         _ => s.models_dir.clone(),
     };
+    #[cfg(target_os = "macos")]
     Command::new("/usr/bin/open").arg("-R").arg(&target).status().await?;
+    // file managers on Linux can't all select a file, so open the folder that holds it
+    #[cfg(target_os = "linux")]
+    Command::new("xdg-open").arg(if target.is_dir() { target.as_path() } else { target.parent().unwrap_or(&target) }).status().await?;
     Ok(Json(json!({ "ok": true })))
 }

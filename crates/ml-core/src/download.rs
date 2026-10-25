@@ -210,17 +210,46 @@ impl Downloads {
     }
 }
 
-/// Installs an engine. llama.cpp and whisper.cpp come from Homebrew when it's there; the image
-/// engine (stable-diffusion.cpp) comes from its official macOS release into Model Launcher's own
-/// engines folder.
+/// Installs an engine. On macOS llama.cpp and whisper.cpp come from Homebrew and the image engine
+/// (stable-diffusion.cpp) from its official release; on Linux all three come from their official
+/// releases. Release builds go into Model Launcher's own engines folder.
+#[cfg(target_os = "macos")]
 pub async fn install_engine(engine: Engine) -> Result<String> {
     match engine {
         Engine::LlamaServer | Engine::LlamaTts => brew("llama.cpp").await,
         Engine::WhisperCli => brew("whisper-cpp").await,
-        Engine::SdCli => install_sd().await,
+        Engine::SdCli => install_release("leejet/stable-diffusion.cpp", Engine::SdCli, &|n| n.contains("Darwin") && n.contains("arm64") && n.ends_with(".zip")).await,
     }
 }
 
+#[cfg(target_os = "linux")]
+pub async fn install_engine(engine: Engine) -> Result<String> {
+    let arm = cfg!(target_arch = "aarch64");
+    // Vulkan runs on NVIDIA, AMD and Intel GPUs alike; without its loader, use the CPU build
+    let vulkan = ["/usr/lib/x86_64-linux-gnu/libvulkan.so.1", "/usr/lib/aarch64-linux-gnu/libvulkan.so.1", "/usr/lib64/libvulkan.so.1", "/usr/lib/libvulkan.so.1"]
+        .iter()
+        .any(|p| Path::new(p).exists());
+    let arch = if arm { "arm64" } else { "x64" };
+    match engine {
+        Engine::LlamaServer | Engine::LlamaTts => {
+            let want = if vulkan { format!("bin-ubuntu-vulkan-{arch}.tar.gz") } else { format!("bin-ubuntu-{arch}.tar.gz") };
+            install_release("ggml-org/llama.cpp", engine, &|n| n.starts_with("llama-") && n.ends_with(&want)).await
+        }
+        Engine::WhisperCli => {
+            let want = format!("whisper-bin-ubuntu-{arch}.tar.gz");
+            install_release("ggml-org/whisper.cpp", engine, &|n| n == want).await
+        }
+        Engine::SdCli => {
+            let cpu = if arm { "aarch64" } else { "x86_64" };
+            install_release("leejet/stable-diffusion.cpp", engine, &|n| {
+                n.contains("Linux") && n.contains(cpu) && n.ends_with(".zip") && !n.contains("rocm") && (n.contains("vulkan") == vulkan)
+            })
+            .await
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
 async fn brew(formula: &str) -> Result<String> {
     let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
         .into_iter()
@@ -233,45 +262,55 @@ async fn brew(formula: &str) -> Result<String> {
     Ok(format!("Installed {formula}"))
 }
 
-async fn install_sd() -> Result<String> {
+/// Downloads a project's latest release build (the first asset `pick` accepts) into the engines
+/// folder, with every binary and library at its top level.
+async fn install_release(repo: &str, engine: Engine, pick: &(dyn Fn(&str) -> bool + Sync)) -> Result<String> {
     let client = reqwest::Client::builder().user_agent("model-launcher").build()?;
-    let rel: serde_json::Value = client
-        .get("https://api.github.com/repos/leejet/stable-diffusion.cpp/releases/latest")
+    // llama.cpp tags a release for every build; take the newest that carries this platform's files
+    let rels: Vec<serde_json::Value> = client
+        .get(format!("https://api.github.com/repos/{repo}/releases?per_page=10"))
         .send()
         .await?
         .error_for_status()?
         .json()
         .await?;
-    let asset = rel["assets"]
-        .as_array()
-        .and_then(|a| {
-            a.iter().find(|x| {
-                let n = x["name"].as_str().unwrap_or("");
-                n.contains("Darwin") && n.contains("arm64") && n.ends_with(".zip")
-            })
-        })
-        .ok_or_else(|| anyhow!("no macOS build in the latest stable-diffusion.cpp release"))?;
+    let (rel, asset) = rels
+        .iter()
+        .find_map(|r| r["assets"].as_array()?.iter().find(|x| pick(x["name"].as_str().unwrap_or(""))).map(|a| (r, a)))
+        .ok_or_else(|| anyhow!("no build for this computer in the latest {repo} releases"))?;
+    let name = asset["name"].as_str().unwrap_or_default();
     let url = asset["browser_download_url"].as_str().unwrap_or_default();
     let bytes = client.get(url).send().await?.error_for_status()?.bytes().await?;
     let dir = engines_dir();
-    std::fs::create_dir_all(&dir)?;
-    let zip = dir.join("sd.zip");
-    std::fs::write(&zip, &bytes)?;
-    let st = tokio::process::Command::new("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(&dir).status().await?;
-    let _ = std::fs::remove_file(&zip);
+    let tmp = dir.join(".unpack");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp)?;
+    let archive = dir.join(name);
+    std::fs::write(&archive, &bytes)?;
+    let st = if name.ends_with(".zip") {
+        tokio::process::Command::new("unzip").arg("-q").arg("-o").arg(&archive).arg("-d").arg(&tmp).status().await?
+    } else {
+        tokio::process::Command::new("tar").arg("-xzf").arg(&archive).arg("-C").arg(&tmp).status().await?
+    };
+    let _ = std::fs::remove_file(&archive);
     if !st.success() {
-        bail!("couldn't unpack the image engine");
+        bail!("couldn't unpack {name}");
     }
-    // the release keeps its files in the zip's top level or a folder; bring sd-cli and its library up
-    for entry in walk(&dir) {
-        let name = entry.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        if (name == "sd-cli" || name.ends_with(".dylib")) && entry.parent() != Some(dir.as_path()) {
-            let _ = std::fs::rename(&entry, dir.join(&name));
-        }
+    // releases keep files at the top level or in a folder; bring binaries and libraries up
+    for entry in walk(&tmp) {
+        let file = entry.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let _ = std::fs::rename(&entry, dir.join(&file));
     }
+    let _ = std::fs::remove_dir_all(&tmp);
+    #[cfg(target_os = "macos")]
     let _ = tokio::process::Command::new("/usr/bin/xattr").arg("-dr").arg("com.apple.quarantine").arg(&dir).status().await;
-    Engine::SdCli.path().context("the image engine didn't unpack where expected")?;
-    Ok(format!("Installed stable-diffusion.cpp {}", rel["tag_name"].as_str().unwrap_or("")))
+    #[cfg(unix)]
+    if let Some(p) = Engine::path(engine) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755));
+    }
+    Engine::path(engine).context("the engine didn't unpack where expected")?;
+    Ok(format!("Installed {} {}", repo.split('/').nth(1).unwrap_or(repo), rel["tag_name"].as_str().unwrap_or("")))
 }
 
 fn walk(dir: &Path) -> Vec<std::path::PathBuf> {

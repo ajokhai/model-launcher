@@ -1,9 +1,11 @@
-//! What this Mac has: memory, cores, disk, and how much memory a process really uses.
+//! What this computer has: memory, cores, disk, and how much memory a process really uses.
+//! macOS reads these from sysctl and Mach; Linux from /proc.
 
 use std::path::Path;
 
 const GB: f64 = 1024.0 * 1024.0 * 1024.0;
 
+#[cfg(target_os = "macos")]
 pub fn total_memory_gb() -> f64 {
     let mut bytes: u64 = 0;
     let mut len = std::mem::size_of::<u64>();
@@ -16,6 +18,7 @@ pub fn total_memory_gb() -> f64 {
 /// Memory macOS can give a new process without pressure: its own "memory free" level (what
 /// `memory_pressure` and Activity Monitor go by, which counts memory it can compress), falling back
 /// to free plus reclaimable pages.
+#[cfg(target_os = "macos")]
 pub fn available_memory_gb() -> f64 {
     let mut level: u32 = 0;
     let mut len = std::mem::size_of::<u32>();
@@ -28,6 +31,7 @@ pub fn available_memory_gb() -> f64 {
     reclaimable_memory_gb()
 }
 
+#[cfg(target_os = "macos")]
 #[allow(deprecated)] // libc points at the mach2 crate for these; the calls themselves are stable
 fn reclaimable_memory_gb() -> f64 {
     let mut stats: libc::vm_statistics64 = unsafe { std::mem::zeroed() };
@@ -69,6 +73,7 @@ pub fn free_disk_gb(path: &Path) -> f64 {
     st.f_bavail as f64 * st.f_frsize as f64 / GB
 }
 
+#[cfg(target_os = "macos")]
 #[repr(C)]
 #[derive(Default)]
 struct RusageInfoV2 {
@@ -93,6 +98,7 @@ struct RusageInfoV2 {
     diskio_byteswritten: u64,
 }
 
+#[cfg(target_os = "macos")]
 extern "C" {
     fn proc_pid_rusage(pid: libc::c_int, flavor: libc::c_int, buffer: *mut RusageInfoV2) -> libc::c_int;
 }
@@ -100,6 +106,7 @@ extern "C" {
 /// The memory a process really holds, in GB. The footprint (Activity Monitor's number) covers GPU
 /// buffers but not weights mapped from the model file, which resident size does count; llama.cpp
 /// maps its weights, so take whichever is larger.
+#[cfg(target_os = "macos")]
 pub fn process_memory_gb(pid: u32) -> Option<f64> {
     let mut info = RusageInfoV2::default();
     // RUSAGE_INFO_V2 = 2
@@ -112,4 +119,31 @@ pub fn make_low_priority(pid: u32) {
     unsafe {
         libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, 10);
     }
+}
+
+/// A "Key:   123 kB" line from a /proc file, in GB.
+#[cfg(target_os = "linux")]
+fn proc_kb(file: &str, key: &str) -> Option<f64> {
+    let text = std::fs::read_to_string(file).ok()?;
+    let line = text.lines().find(|l| l.starts_with(key))?;
+    let kb: f64 = line[key.len()..].trim_start_matches(':').split_whitespace().next()?.parse().ok()?;
+    Some(kb * 1024.0 / GB)
+}
+
+#[cfg(target_os = "linux")]
+pub fn total_memory_gb() -> f64 {
+    proc_kb("/proc/meminfo", "MemTotal").unwrap_or(8.0)
+}
+
+/// The kernel's own estimate of memory a new process can get without swapping.
+#[cfg(target_os = "linux")]
+pub fn available_memory_gb() -> f64 {
+    proc_kb("/proc/meminfo", "MemAvailable").unwrap_or(0.0)
+}
+
+/// Resident memory, which counts the model weights llama.cpp maps from disk. Video memory on a
+/// separate GPU isn't included; the RAM budget is about system RAM.
+#[cfg(target_os = "linux")]
+pub fn process_memory_gb(pid: u32) -> Option<f64> {
+    proc_kb(&format!("/proc/{pid}/status"), "VmRSS")
 }

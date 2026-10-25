@@ -13,9 +13,18 @@ use std::time::Duration;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn port() -> u16 {
+/// Model Launcher's settings and outputs folder (the same place the app uses).
+fn support_dir() -> std::path::PathBuf {
     let home: std::path::PathBuf = std::env::var_os("HOME").map(Into::into).unwrap_or_default();
-    std::fs::read(home.join("Library/Application Support/Model Launcher/settings.json"))
+    if cfg!(target_os = "macos") {
+        return home.join("Library/Application Support/Model Launcher");
+    }
+    let data = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).filter(|p| p.is_absolute()).unwrap_or(home.join(".local/share"));
+    data.join("Model Launcher")
+}
+
+fn port() -> u16 {
+    std::fs::read(support_dir().join("settings.json"))
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
         .and_then(|v| v["api_port"].as_u64())
@@ -61,7 +70,13 @@ fn dechunk(mut b: &[u8]) -> Vec<u8> {
 fn api_raw(method: &str, path: &str, ctype: &str, body: &[u8], timeout: Duration) -> Result<Vec<u8>, String> {
     let mut res = http(method, path, ctype, body, timeout);
     if res.is_err() {
-        let _ = std::process::Command::new("/usr/bin/open").args(["-g", "-b", "com.ajokhai.modellauncher"]).status();
+        if cfg!(target_os = "macos") {
+            let _ = std::process::Command::new("/usr/bin/open").args(["-g", "-b", "com.ajokhai.modellauncher"]).status();
+        } else {
+            // the app ships next to this binary on Linux
+            let app = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("model-launcher")));
+            let _ = std::process::Command::new(app.unwrap_or("model-launcher".into())).spawn();
+        }
         for _ in 0..40 {
             std::thread::sleep(Duration::from_millis(500));
             res = http(method, path, ctype, body, timeout);
@@ -229,14 +244,14 @@ fn call(name: &str, a: &Value) -> Result<String, String> {
                 body["model"] = json!(m);
             }
             let wav = api_raw("POST", "/v1/audio/speech", "application/json", body.to_string().as_bytes(), long)?;
-            let dir = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default()
-                .join("Library/Application Support/Model Launcher/outputs");
+            let dir = support_dir().join("outputs");
             let _ = std::fs::create_dir_all(&dir);
             let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
             let out = dir.join(format!("speech-{stamp}.wav"));
             std::fs::write(&out, &wav).map_err(|e| e.to_string())?;
             if a["play"].as_bool().unwrap_or(false) {
-                let _ = std::process::Command::new("/usr/bin/afplay").arg(&out).status();
+                let player = if cfg!(target_os = "macos") { "/usr/bin/afplay" } else { "paplay" };
+                let _ = std::process::Command::new(player).arg(&out).status();
             }
             Ok(format!("Wrote {}", out.display()))
         }

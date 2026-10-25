@@ -4,3 +4,4 @@
 app/src-tauri/gen
 *.dmg
 .DS_Store
+app/src-tauri/binaries/
