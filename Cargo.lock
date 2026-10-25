@@ -1959,7 +1959,7 @@ dependencies = [
 
 [[package]]
 name = "ml-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1975,14 +1975,14 @@ dependencies = [
 
 [[package]]
 name = "ml-mcp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "model-launcher"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ml-core",
  "serde_json",

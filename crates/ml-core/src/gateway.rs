@@ -30,6 +30,7 @@ use crate::library::{self, Installed};
 use crate::settings::{outputs_dir, Settings};
 use crate::storage;
 use crate::system;
+use crate::update;
 use crate::web;
 use crate::Core;
 
@@ -94,11 +95,16 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/api/settings", post(update_settings))
         .route("/api/engines/install", post(install_engine))
         .route("/api/reveal", post(reveal))
+        .route("/api/update", get(update_status))
+        .route("/api/update/check", post(update_check))
+        .route("/api/update/install", post(update_install))
         .route("/api/bench", get(bench_status))
         .route("/api/bench/start", post(bench_start))
         .route("/api/bench/stop", post(bench_stop))
         .route("/api/bench/verdict", post(bench_verdict))
         .route("/api/bench/reveal", post(bench_reveal))
+        .route("/api/bench/tasks", post(bench_save_task))
+        .route("/api/bench/tasks/delete", post(bench_delete_task))
         .route("/api/drives", get(drives))
         .route("/api/models/move", post(move_models))
         .route("/api/web/search", post(web_search))
@@ -389,6 +395,7 @@ async fn status(State(core): State<Arc<Core>>) -> Json<Value> {
         "engines": engines,
         "downloads": core.downloads.all(),
         "models_move": core.mover.progress(),
+        "update": core.updater.state(),
         "models_drive_error": s.models_drive_ready().err().map(|e| e.to_string()),
         "api_url": format!("http://127.0.0.1:{}/v1", s.api_port),
     }))
@@ -607,21 +614,66 @@ async fn save_settings(core: &Arc<Core>, patch: Value) -> anyhow::Result<Setting
     Ok(new)
 }
 
+async fn update_status(State(core): State<Arc<Core>>) -> Json<Value> {
+    Json(serde_json::to_value(core.updater.state()).unwrap_or_default())
+}
+
+async fn update_check(State(core): State<Arc<Core>>) -> R<Json<Value>> {
+    Ok(Json(serde_json::to_value(update::check_now(&core).await?)?))
+}
+
+/// Installs a downloaded update now: unloads models, quits, swaps the app and relaunches.
+async fn update_install(State(core): State<Arc<Core>>) -> R<Json<Value>> {
+    let c = core.clone();
+    if core.updater.state().ready.is_none() {
+        bail_api("no update has been downloaded yet")?;
+    }
+    // reply first, then quit
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        if let Err(e) = update::install(&c).await {
+            c.engines.note(format!("Couldn't install the update: {e:#}"));
+        }
+    });
+    Ok(Json(json!({ "ok": true })))
+}
+
 async fn bench_status(State(core): State<Arc<Core>>) -> Json<Value> {
     Json(json!({
         "available": bench::available(),
         "current": core.bench.current(),
         "history": bench::history(),
+        "tasks": bench::tasks(),
         "folder": bench::results_dir(),
         "displays": system::display_count(),
     }))
 }
 
-/// Loads the model if needed ("force" runs it past the budget) and starts the tweet test.
-async fn bench_start(State(core): State<Arc<Core>>, Json(req): Json<LaunchReq>) -> R<Json<Value>> {
+#[derive(Deserialize)]
+struct BenchReq {
+    id: String,
+    #[serde(default)]
+    force: bool,
+    /// Which benchmark; the tweet test when left out.
+    task: Option<String>,
+}
+
+/// Loads the model if needed ("force" runs it past the budget) and starts a benchmark.
+async fn bench_start(State(core): State<Arc<Core>>, Json(req): Json<BenchReq>) -> R<Json<Value>> {
+    let task = bench::find_task(req.task.as_deref().unwrap_or("tweet")).ok_or_else(|| anyhow!("that benchmark doesn't exist"))?;
     let m = resolve(&core, Some(&req.id), Kind::Chat).await?;
     let port = core.engines.load_chat(&m, req.force).await?;
-    core.bench.start(core.engines.clone(), m, port)?;
+    core.bench.start(core.engines.clone(), m, port, task)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn bench_save_task(Json(t): Json<bench::Task>) -> R<Json<Value>> {
+    let id = bench::save_task(t)?;
+    Ok(Json(json!({ "ok": true, "id": id })))
+}
+
+async fn bench_delete_task(Json(req): Json<IdReq>) -> R<Json<Value>> {
+    bench::delete_task(&req.id)?;
     Ok(Json(json!({ "ok": true })))
 }
 

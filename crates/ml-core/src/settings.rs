@@ -33,6 +33,8 @@ pub struct Settings {
     /// Load models bigger than the RAM budget anyway, reading their weights from the drive as
     /// needed instead of holding them all in RAM. Slower; best with models on a fast SSD.
     pub disk_memory: bool,
+    /// Download new versions and install them once nothing is running (macOS).
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -50,6 +52,7 @@ impl Default for Settings {
             max_loaded: 0,
             web_access: true,
             disk_memory: false,
+            auto_update: true,
         }
     }
 }

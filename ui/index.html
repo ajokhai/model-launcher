@@ -20,6 +20,7 @@
       <button data-tab="connect">Connect</button>
       <button data-tab="settings">Settings</button>
       <button data-tab="help">Help</button>
+      <button data-tab="support">Support</button>
     </nav>
     <div class="meter" id="meter" title="RAM used by running models, out of your RAM budget (Settings)">
       <div class="meter-bar"><i id="meter-fill"></i></div>
@@ -59,7 +60,7 @@
         </div>
       </div>
       <div class="grid" id="catalog"></div>
-      <div class="add-card"><div><b>Not finding what you want?</b><div class="muted">Add any model from Hugging Face or another site, or files you already have. Model Launcher walks you through it.</div></div><button class="btn primary" onclick="openAdd()">+ Add your own</button></div>
+      <div class="add-tile"><div><b>Not finding what you want?</b><div class="muted">Add any model from Hugging Face or another site, or files you already have. Model Launcher walks you through it.</div></div><button class="btn primary" onclick="openAdd()">+ Add your own</button></div>
     </section>
 
     <!-- Studio -->
@@ -113,7 +114,7 @@
 
     <!-- Benchmark -->
     <section class="page" id="page-bench">
-      <div class="page-head"><div><h1>Benchmark</h1><p class="sub">Can your model use a computer? It gets 10 minutes to open Chrome, go to x.com and post a tweet, using <a href="#" data-link="https://github.com/ajokhai/computer-use-lite">Computer Use</a> to see and click. Then you check X, and get a report to share.</p></div></div>
+      <div class="page-head"><div><h1>Benchmark</h1><p class="sub">Can your model use a computer? Give it a task, like posting a tweet, and it works the Mac through <a href="#" data-link="https://github.com/ajokhai/computer-use-lite">Computer Use</a>, seeing the screen and clicking. Then you check whether it really worked, and get a report to share. Make your own benchmarks too.</p></div><button class="btn" onclick="editTask()">+ New benchmark</button></div>
       <div id="bench-setup"></div>
       <div id="bench-run"></div>
       <h2 class="section">Past runs</h2>
@@ -208,6 +209,13 @@
           <small class="note">Chat models can search the web and read pages when a question needs it. Turn off to keep them fully offline. Loaded models reload to apply it.</small>
         </div>
         <div class="card">
+          <div class="card-title"><span class="dot teal"></span>Updates</div>
+          <div id="update-info" class="hint"></div>
+          <label class="toggle"><input type="checkbox" id="s-update"><span>Update automatically</span></label>
+          <small class="note">Checks GitHub at launch and every 6 hours. New versions download in the background and install once no model, benchmark or download is running, then the app reopens.</small>
+          <div class="row"><button class="btn" id="update-check">Check for updates</button><span id="update-action"></span></div>
+        </div>
+        <div class="card">
           <div class="card-title"><span class="dot violet"></span>Engines</div>
           <p class="hint">The open-source programs that run models.</p>
           <div id="engines"></div>
@@ -220,6 +228,16 @@
     </section>
 
     <!-- Help -->
+    <section class="page" id="page-support">
+      <div class="page-head"><div><h1>Support Model Launcher</h1><p class="sub">Model Launcher is free and open source, built by one person, <a href="#" data-link="https://x.com/ajokhai">Josh Ayokhai</a>. If it's useful to you, here's how to help it keep going.</p></div></div>
+      <div class="support">
+        <div class="card"><div class="card-title">Buy me a malt</div><p class="hint">A one-off tip, the price of a coffee (or a malt). It pays for the time and the test hardware.</p><br><button class="btn primary" data-link="https://buymeamalt.com/@ajokhai">Buy me a malt</button></div>
+        <div class="card"><div class="card-title">Star the repo</div><p class="hint">Free, and it helps other people find the project on GitHub.</p><br><button class="btn" data-link="https://github.com/ajokhai/model-launcher">Star Model Launcher</button> <button class="btn ghost" data-link="https://github.com/ajokhai/computer-use-lite">Star Computer Use</button></div>
+        <div class="card"><div class="card-title">Share a benchmark</div><p class="hint">Run the test on your machine and post the result. Every new Mac and model helps.</p><br><button class="btn" onclick="document.querySelector('[data-tab=bench]').click()">Open Benchmark</button></div>
+        <div class="card"><div class="card-title">Report a bug or idea</div><p class="hint">Something broke, or you want a model added? Open an issue.</p><br><button class="btn" data-link="https://github.com/ajokhai/model-launcher/issues/new">Open an issue</button></div>
+      </div>
+    </section>
+
     <section class="page" id="page-help">
       <div class="page-head"><div><h1>Help</h1><p class="sub">Quick answers. The full docs are on <a href="#" data-link="https://github.com/ajokhai/model-launcher/tree/main/docs">GitHub</a>.</p></div></div>
       <div class="help">
@@ -298,6 +316,18 @@
     </div>
   </div>
   <div class="toast" id="toast"></div>
+  <div class="modal" id="task-modal" hidden>
+    <div class="modal-card">
+      <div class="row"><h3 style="flex:1" id="task-title">New benchmark</h3><button class="btn icon-only" onclick="$('task-modal').hidden = true">Close</button></div>
+      <label class="field"><span>Name</span><input id="t-name" placeholder="Make a shopping list in Notes"></label>
+      <label class="field"><span>What the model should do</span><textarea id="t-prompt" rows="5" placeholder="Open Notes, make a new note titled &quot;Groceries&quot; and list milk, eggs and bread, one per line."></textarea><small>Write it like you'd ask a person. <code>{model}</code> becomes the model's name. Be specific: which app, what to type, what counts as done.</small></label>
+      <label class="field"><span>How you'll check it</span><input id="t-check" placeholder="Is the Groceries note in Notes with all three items?"><small>The question you answer afterwards. Only you can say it really worked.</small></label>
+      <label class="field"><span>Time limit</span><select id="t-minutes"><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="10" selected>10 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option></select></label>
+      <div class="row end"><button class="btn danger" id="t-delete" hidden>Delete</button><span class="spacer"></span><button class="btn primary" onclick="saveTask()">Save benchmark</button></div>
+      <small class="note">Saved in ~/Documents/Computer Use Benchmarks/tasks, so Computer Use's <code>benchmark.py</code> can run it too. Share the file to let someone else run the same test.</small>
+    </div>
+  </div>
+
   <div class="modal" id="modal" hidden>
     <div class="modal-card">
       <h3 id="modal-title"></h3>

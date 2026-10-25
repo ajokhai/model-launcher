@@ -4,7 +4,7 @@
 //! as Computer Use's `scripts/benchmark.py`, so one report covers both.
 
 use anyhow::{anyhow, bail, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -20,7 +20,6 @@ use crate::system;
 
 pub const CU_MCP: &str = "/Applications/Computer Use.app/Contents/Frameworks/cu-mcp";
 pub const REPO: &str = "https://github.com/ajokhai/computer-use-lite";
-const TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_TURNS: usize = 40;
 const KEEP: usize = 24;
 const RESULT_CHARS: usize = 6000;
@@ -35,15 +34,122 @@ pub fn available() -> bool {
     std::path::Path::new(CU_MCP).exists()
 }
 
-fn task(label: &str) -> String {
-    format!(
-        "In Google Chrome, go to x.com, and post a tweet saying that you, {label}, are testing computer use with this account, \
-         and include the link {REPO}. The wording is up to you; for example: \"This is {label} testing computer use with my account. {REPO}\""
-    )
+/// A benchmark: what the model is asked to do and how the person checks it. "tweet" is built in;
+/// the rest are JSON files in ~/Documents/Computer Use Benchmarks/tasks, made on the Benchmark page
+/// or with `benchmark.py new`. `{model}` in the instructions becomes the model's name.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Task {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    pub prompt: String,
+    /// The question the person answers afterwards, e.g. "Is the note in Notes?"
+    #[serde(default = "default_check")]
+    pub check: String,
+    #[serde(default = "default_minutes")]
+    pub minutes: u32,
+    #[serde(default)]
+    pub builtin: bool,
+}
+
+fn default_check() -> String {
+    "Did it work?".into()
+}
+
+fn default_minutes() -> u32 {
+    10
+}
+
+pub fn tweet() -> Task {
+    Task {
+        id: "tweet".into(),
+        name: "Post a tweet".into(),
+        prompt: format!(
+            "In Google Chrome, go to x.com, and post a tweet saying that you, {{model}}, are testing computer use with this account, \
+             and include the link {REPO}. The wording is up to you; for example: \"This is {{model}} testing computer use with my account. {REPO}\""
+        ),
+        check: "Open your X profile. Did the tweet post?".into(),
+        minutes: 10,
+        builtin: true,
+    }
+}
+
+fn tasks_dir() -> PathBuf {
+    results_dir().join("tasks")
+}
+
+/// The built-in tweet test, then every saved benchmark by name.
+pub fn tasks() -> Vec<Task> {
+    let mut out: Vec<Task> = std::fs::read_dir(tasks_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .filter_map(|e| {
+            let mut t: Task = serde_json::from_slice(&std::fs::read(e.path()).ok()?).ok()?;
+            t.id = e.path().file_stem()?.to_string_lossy().to_string();
+            t.builtin = false;
+            Some(t)
+        })
+        .collect();
+    out.sort_by_key(|t| t.name.to_lowercase());
+    out.insert(0, tweet());
+    out
+}
+
+pub fn find_task(id: &str) -> Option<Task> {
+    tasks().into_iter().find(|t| t.id == id)
+}
+
+/// Saves a benchmark (a new one when `id` is empty). Returns its id.
+pub fn save_task(mut t: Task) -> Result<String> {
+    t.name = t.name.trim().to_string();
+    t.prompt = t.prompt.trim().to_string();
+    if t.name.is_empty() || t.prompt.is_empty() {
+        bail!("a benchmark needs a name and instructions");
+    }
+    if t.id == "tweet" {
+        bail!("the tweet test is built in; save yours under a new name");
+    }
+    t.minutes = t.minutes.clamp(1, 60);
+    if t.check.trim().is_empty() {
+        t.check = default_check();
+    }
+    if t.id.is_empty() {
+        let base: String = t.name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+        let base = base.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+        let base = if base.is_empty() { "benchmark".to_string() } else { base };
+        let mut id = base.clone();
+        let mut n = 2;
+        while tasks_dir().join(format!("{id}.json")).exists() || id == "tweet" {
+            id = format!("{base}-{n}");
+            n += 1;
+        }
+        t.id = id;
+    }
+    if t.id.contains('/') || t.id.contains("..") {
+        bail!("bad benchmark id");
+    }
+    std::fs::create_dir_all(tasks_dir())?;
+    let file = json!({ "name": t.name, "prompt": t.prompt, "check": t.check, "minutes": t.minutes });
+    std::fs::write(tasks_dir().join(format!("{}.json", t.id)), serde_json::to_vec_pretty(&file)?)?;
+    Ok(t.id)
+}
+
+pub fn delete_task(id: &str) -> Result<()> {
+    if id == "tweet" || id.contains('/') || id.contains("..") {
+        bail!("that benchmark can't be deleted");
+    }
+    std::fs::remove_file(tasks_dir().join(format!("{id}.json")))?;
+    Ok(())
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Run {
+    pub task_id: String,
+    pub task_name: String,
+    pub check: String,
+    pub prompt: String,
     pub model_id: String,
     pub model_name: String,
     pub log: Vec<String>,
@@ -79,7 +185,7 @@ impl Bench {
     }
 
     /// Starts a run in the background. The model must already be loaded on `port`.
-    pub fn start(self: &Arc<Self>, engines: Arc<Engines>, m: Installed, port: u16) -> Result<()> {
+    pub fn start(self: &Arc<Self>, engines: Arc<Engines>, m: Installed, port: u16, task: Task) -> Result<()> {
         if !available() {
             bail!("Computer Use isn't installed. Get it from {REPO}/releases, open it once and allow Accessibility and Screen Recording.");
         }
@@ -88,7 +194,14 @@ impl Bench {
         }
         let main_only = system::display_count() > 1;
         *self.stop.lock().unwrap() = false;
+        let label = m.name.split_whitespace().next().unwrap_or(&m.name).to_string();
+        let prompt = task.prompt.replace("{model}", &label);
+        let limit = Duration::from_secs(task.minutes as u64 * 60);
         *self.run.lock().unwrap() = Some(Run {
+            task_id: task.id.clone(),
+            task_name: task.name.clone(),
+            check: task.check.clone(),
+            prompt: prompt.clone(),
             model_id: m.id.clone(),
             model_name: m.name.clone(),
             running: true,
@@ -99,7 +212,7 @@ impl Bench {
         let me = self.clone();
         tokio::spawn(async move {
             let t0 = Instant::now();
-            let result = match me.drive(&engines, &m, port, main_only, t0).await {
+            let result = match me.drive(&engines, &m, port, main_only, t0, &prompt, limit).await {
                 Ok(r) => r,
                 Err(e) => format!("stopped: {e:#}"),
             };
@@ -112,7 +225,8 @@ impl Bench {
         Ok(())
     }
 
-    async fn drive(&self, engines: &Engines, m: &Installed, port: u16, main_only: bool, t0: Instant) -> Result<String> {
+    #[allow(clippy::too_many_arguments)]
+    async fn drive(&self, engines: &Engines, m: &Installed, port: u16, main_only: bool, t0: Instant, prompt: &str, limit: Duration) -> Result<String> {
         let mut mcp = Mcp::start().await?;
         let tools: Vec<Value> = mcp.call("tools/list", json!({})).await?["tools"]
             .as_array()
@@ -123,19 +237,18 @@ impl Bench {
             .filter(|t| t["name"] != "computer_task")
             .map(|t| json!({ "type": "function", "function": { "name": t["name"], "description": t["description"], "parameters": t.get("inputSchema").cloned().unwrap_or(json!({"type": "object"})) } }))
             .collect();
-        let label = m.name.split_whitespace().next().unwrap_or(&m.name).to_string();
         let mut guard = main_only.then(Guard::default);
         if main_only {
             raise_main_chrome().await;
         }
         let http = reqwest::Client::builder().timeout(Duration::from_secs(300)).build()?;
-        let mut msgs = vec![json!({ "role": "system", "content": SYSTEM }), json!({ "role": "user", "content": task(&label) })];
+        let mut msgs = vec![json!({ "role": "system", "content": SYSTEM }), json!({ "role": "user", "content": prompt })];
         for _ in 0..MAX_TURNS {
             if *self.stop.lock().unwrap() {
                 return Ok("stopped: you stopped it".into());
             }
-            if t0.elapsed() > TIMEOUT {
-                return Ok(format!("stopped: TIMED OUT after {}s", TIMEOUT.as_secs()));
+            if t0.elapsed() > limit {
+                return Ok(format!("stopped: TIMED OUT after {}s", limit.as_secs()));
             }
             engines.touch_chat(&m.id).await;
             fit(&mut msgs);
@@ -191,7 +304,7 @@ impl Bench {
                 finished |= name == "task_done";
             }
             if finished {
-                return Ok("done (the model called task_done; check X to see if it really posted)".into());
+                return Ok("done (the model says it finished; check for yourself)".into());
             }
         }
         Ok("stopped: ran out of turns".into())
@@ -215,7 +328,7 @@ impl Bench {
         });
         let line = json!({
             "model": format!("{}-mcp", run.model_id), "model_id": run.model_id, "model_name": run.model_name,
-            "task": "tweet", "seconds": run.seconds, "result": run.result, "actions": run.actions,
+            "task": run.task_id, "task_name": run.task_name, "prompt": run.prompt, "check": run.check, "seconds": run.seconds, "result": run.result, "actions": run.actions,
             "log_tail": run.log.iter().rev().take(40).rev().map(|l| format!("  {l}")).collect::<Vec<_>>(),
             "verdict": verdict, "at": run.at, "machine": machine, "source": "model-launcher",
             "size_gb": m.map(|m| m.size_gb), "vision": m.map(|m| m.projector.is_some()),
@@ -251,8 +364,8 @@ pub fn report(r: &Value) -> String {
     let sees = if r["vision"].as_bool() == Some(true) { " · reads images" } else { "" };
     let log: Vec<String> = r["log_tail"].as_array().into_iter().flatten().filter_map(|l| l.as_str()).map(|l| l.trim().to_string()).collect();
     format!(
-        "# {}: {verdict}\n\n- **Task:** tweet (post a tweet from Chrome naming the model and linking {REPO})\n- **Result:** {} s, {} tool calls. {}\n- **Model:** {} (`{}`){sees}{size}\n- **Server:** {}\n- **Mac:** {}, {} GB RAM, macOS {}, {} display(s)\n- **When:** {}\n\n## Tool calls\n\n```\n{}\n```\n\nRun with [Model Launcher](https://github.com/ajokhai/model-launcher)'s Benchmark page and [Computer Use]({REPO}).\n",
-        s("model_name"), r["seconds"], r["actions"], s("result"), s("model_name"), s("model_id"), s("url"),
+        "# {}: {verdict}\n\n- **Benchmark:** {}\n- **Instructions:** {}\n- **Checked by:** {}\n- **Result:** {} s, {} tool calls. {}\n- **Model:** {} (`{}`){sees}{size}\n- **Server:** {}\n- **Mac:** {}, {} GB RAM, macOS {}, {} display(s)\n- **When:** {}\n\n## Tool calls\n\n```\n{}\n```\n\nRun with [Model Launcher](https://github.com/ajokhai/model-launcher)'s Benchmark page and [Computer Use]({REPO}).\n",
+        s("model_name"), if s("task_name").is_empty() { s("task") } else { s("task_name") }, s("prompt"), s("check"), r["seconds"], r["actions"], s("result"), s("model_name"), s("model_id"), s("url"),
         mc["chip"].as_str().unwrap_or("?"), mc["ram_gb"], mc["macos"].as_str().unwrap_or("?"), mc["displays"], s("at"), log.join("\n")
     )
 }
@@ -287,7 +400,7 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-fn now() -> String {
+pub fn now() -> String {
     let t = unsafe { libc::time(std::ptr::null_mut()) };
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     unsafe { libc::localtime_r(&t, &mut tm) };

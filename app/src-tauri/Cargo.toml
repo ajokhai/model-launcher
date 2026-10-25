@@ -3,7 +3,7 @@ name = "model-launcher"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Launch open-source chat, voice and image models on your Mac"
+description = "Launch open-source chat, voice, image and video models on your Mac or Linux PC"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

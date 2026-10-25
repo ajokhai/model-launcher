@@ -238,9 +238,9 @@ a { color: var(--text); text-decoration: underline; text-decoration-color: var(-
 .icon.logo-img img { width: 100%; height: 100%; object-fit: cover; }
 .gallery video { width: 100%; border-radius: 14px; background: #000; }
 
-.add-card { display: flex; align-items: center; gap: 16px; margin-top: 18px; padding: 16px 18px; border: 1.5px dashed var(--line); border-radius: 12px; }
-.add-card > div { flex: 1; }
-.add-card .muted { margin-top: 3px; }
+.add-tile { display: flex; align-items: center; gap: 16px; margin-top: 18px; padding: 16px 18px; border: 1.5px dashed var(--line); border-radius: 12px; }
+.add-tile > div { flex: 1; }
+.add-tile .muted { margin-top: 3px; }
 #modal-text { white-space: pre-line; }
 .drive { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .drive:last-of-type { margin-bottom: 10px; }
@@ -252,3 +252,8 @@ a { color: var(--text); text-decoration: underline; text-decoration-color: var(-
 .bench-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; }
 .bench-table td { padding: 8px; border-top: 1px solid var(--line); }
 #bench-run .card { margin-bottom: 14px; }
+.support { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.bench-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.bench-task { padding: 12px 14px; border-radius: 10px; background: rgba(127,127,127,.08); display: grid; gap: 6px; }
+#task-modal textarea, #task-modal input { width: 100%; font: inherit; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: inherit; }
+#task-modal .modal-card { width: min(560px, calc(100vw - 32px)); gap: 14px; }

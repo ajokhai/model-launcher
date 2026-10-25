@@ -9,6 +9,7 @@ pub mod library;
 pub mod settings;
 pub mod storage;
 pub mod system;
+pub mod update;
 pub mod web;
 
 use std::sync::Arc;
@@ -22,6 +23,7 @@ pub struct Core {
     pub downloads: Arc<download::Downloads>,
     pub mover: Arc<storage::Mover>,
     pub bench: Arc<bench::Bench>,
+    pub updater: Arc<update::Updater>,
 }
 
 impl Core {
@@ -36,13 +38,14 @@ impl Core {
         for pid in engines::reap_orphan() {
             engines.note(format!("Stopped a model server left running by the last session (pid {pid})"));
         }
-        Arc::new(Core { settings, engines, downloads: Default::default(), mover: Default::default(), bench: Default::default() })
+        Arc::new(Core { settings, engines, downloads: Default::default(), mover: Default::default(), bench: Default::default(), updater: Default::default() })
     }
 
     /// Serves the API and runs the watchdog until the process ends.
     pub async fn serve(self: Arc<Self>) -> anyhow::Result<()> {
         let port = self.settings.read().await.api_port;
         tokio::spawn(self.engines.clone().watchdog());
+        tokio::spawn(update::run(self.clone()));
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
         axum::serve(listener, gateway::router(self.clone())).await?;
         Ok(())

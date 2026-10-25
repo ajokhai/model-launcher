@@ -2,8 +2,8 @@
 
 <h1 align="center">Model Launcher</h1>
 
-<p align="center">Launch open-source chat, voice and image models on your Mac as easily as opening an app.<br>
-Fast Rust core · memory limits you control · OpenAI-compatible API · MCP server</p>
+<p align="center">Launch open-source chat, voice, image and video models on your Mac as easily as opening an app. Linux too, in preview.<br>
+Fast Rust core · memory limits you control · OpenAI-compatible API · MCP server · computer-use benchmarks</p>
 
 ---
 
@@ -15,8 +15,12 @@ Model Launcher keeps your local models in one folder, shows which ones your Mac 
 - **Voice**: speech to text with Whisper ([whisper.cpp](https://github.com/ggml-org/whisper.cpp)) and text to speech with OuteTTS (llama.cpp).
 - **Images** with SD Turbo and Stable Diffusion, and **video** with Wan 2.1 ([stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)).
 - **Several models at once, hot-swapped.** Name any model, in the app or in an API call, and it loads. On a Mac with room, several stay loaded together; when the next one doesn't fit, the least recently used one makes way.
-- **It won't run away with your memory.** You set a memory budget. Launches that don't fit are refused, a watchdog stops anything that grows past the budget, idle models unload, and you choose CPU threads, GPU use and priority.
-- **One tidy folder.** Every model lives in `~/Models/{Chat,Voice,Image}/<model>/`.
+- **It won't run away with your memory.** You set a RAM budget. Launches that don't fit are refused, a watchdog stops anything that grows past the budget, idle models unload, and you choose CPU threads, GPU use and priority.
+- **Or push past it, on purpose.** **Run anyway** loads a model bigger than your budget, and **Use disk as extra memory** lets big models read their weights from the drive as needed. Move all your models to an external SSD in one click.
+- **Internet access.** Chat models can search the web and read pages when a question needs it. One switch in Settings turns it off.
+- **Benchmarks.** Test whether a model can actually use a computer: the built-in tweet test or benchmarks you write yourself, with a report to share. See [Benchmark a model](#benchmark-a-model).
+- **Updates itself.** It checks GitHub at launch and every 6 hours, and installs new versions once nothing is running.
+- **One tidy folder.** Every model lives in `~/Models/{Chat,Voice,Image,Video}/<model>/`.
 - **Bring your own.** Paste any Hugging Face link, pick files already on your Mac, or drop in a folder. See [Bring your own model](docs/models.md#bring-your-own-model).
 - **Clear sources.** Every card says whether a model is unimodal or multimodal, and links where it comes from and its license.
 
@@ -30,7 +34,7 @@ The first time a model needs an engine, Model Launcher installs it: llama.cpp an
 
 ## Benchmark a model
 
-The **Benchmark** page tests whether a model can use a computer: with [Computer Use](https://github.com/ajokhai/computer-use-lite) installed, the model gets 10 minutes to open Chrome, go to x.com and post a tweet. You check X, and the report (model, Mac, time, every tool call) is saved to `~/Documents/Computer Use Benchmarks`, ready to share on X or as an issue. Prefer the terminal? Computer Use's `python3 scripts/benchmark.py` does the same and writes to the same folder. See [the guide](https://github.com/ajokhai/computer-use-lite/blob/main/docs/benchmark.md).
+The **Benchmark** page tests whether a model can use a computer. With [Computer Use](https://github.com/ajokhai/computer-use-lite) installed, the model works the Mac by itself, seeing the screen and clicking. The built-in test gives it 10 minutes to open Chrome, go to x.com and post a tweet. Press **+ New benchmark** to write your own: what the model should do, the question you'll answer to check it, and a time limit. Afterwards you say whether it really worked, and the report (benchmark, model, Mac, time, every tool call) is saved to `~/Documents/Computer Use Benchmarks`, ready to share on X or as an issue. Your benchmarks are files in its `tasks` folder, so you can share them too. Prefer the terminal? Computer Use's `python3 scripts/benchmark.py` does the same and writes to the same folder. See [the guide](https://github.com/ajokhai/computer-use-lite/blob/main/docs/benchmark.md).
 
 ## Use it from other apps
 
@@ -99,6 +103,14 @@ Model Launcher stands on [llama.cpp](https://github.com/ggml-org/llama.cpp) and 
 | Stable Diffusion 1.5 | Runway / Stability AI | [runwayml/stable-diffusion-v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5) (GGUF by [second-state](https://huggingface.co/second-state/stable-diffusion-v1-5-GGUF)) | CreativeML OpenRAIL-M |
 
 Model weights aren't part of this repo and keep their own licenses. Check them before commercial use.
+
+## Support
+
+Model Launcher is free and open source. If it's useful to you:
+
+- [Buy me a malt](https://buymeamalt.com/@ajokhai) (a one-off tip)
+- Star this repo, and [Computer Use](https://github.com/ajokhai/computer-use-lite) too
+- Run the benchmark on your machine and share the result
 
 ## License
 
