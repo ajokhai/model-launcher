@@ -146,6 +146,9 @@ pub fn find(s: &Settings, id: &str) -> Option<Installed> {
 /// kind folder) into a folder of their own. Files that belong to a catalog model go to its folder.
 pub fn tidy(s: &Settings) -> Vec<String> {
     let mut moved = Vec::new();
+    if s.models_drive_ready().is_err() {
+        return moved;
+    }
     for kind in KINDS {
         let _ = std::fs::create_dir_all(s.kind_dir(kind));
     }

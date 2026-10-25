@@ -56,6 +56,8 @@ These are what the app's window and the MCP server use.
 | `POST /api/settings {...}` | Change settings (any subset of the fields in `/api/status`) |
 | `POST /api/engines/install {"engine"}` | Install `llama_server`, `llama_tts`, `whisper_cli` or `sd_cli` |
 | `POST /api/reveal {"id"}` | Show a model's folder in Finder |
+| `GET /api/drives` | This Mac and connected drives, with free space and which holds the models |
+| `POST /api/models/move {"path"}` | Move every model to a drive's `Models` folder (or back to `~/Models`); progress is `models_move` in `/api/status` |
 | `POST /api/web/search {"query","max_results"?}` | Web search results (title, url, snippet). Refused when Internet access is off |
 | `POST /api/web/fetch {"url"}` | A web page as plain text. Local and private addresses are refused |
 

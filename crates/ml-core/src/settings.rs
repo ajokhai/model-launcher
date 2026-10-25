@@ -30,6 +30,9 @@ pub struct Settings {
     pub max_loaded: u32,
     /// Let chat models search the web and read pages. Off keeps them fully offline.
     pub web_access: bool,
+    /// Load models bigger than the RAM budget anyway, reading their weights from the drive as
+    /// needed instead of holding them all in RAM. Slower; best with models on a fast SSD.
+    pub disk_memory: bool,
 }
 
 impl Default for Settings {
@@ -46,6 +49,7 @@ impl Default for Settings {
             api_port: 11500,
             max_loaded: 0,
             web_access: true,
+            disk_memory: false,
         }
     }
 }
@@ -97,6 +101,26 @@ impl Settings {
             r if r >= 24.0 => 2,
             _ => 1,
         }
+    }
+
+    /// Fails when the models folder is on an external drive that isn't plugged in, so nothing gets
+    /// written into an empty /Volumes folder on this Mac by mistake.
+    pub fn models_drive_ready(&self) -> anyhow::Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        let mut parts = self.models_dir.components();
+        let (Some(_), Some(v), Some(name)) = (parts.next(), parts.next(), parts.next()) else { return Ok(()) };
+        if v.as_os_str() != "Volumes" {
+            return Ok(());
+        }
+        let root = PathBuf::from("/Volumes").join(name);
+        let mounted = match (std::fs::metadata(&root), std::fs::metadata("/Volumes")) {
+            (Ok(a), Ok(b)) => a.dev() != b.dev(),
+            _ => false,
+        };
+        if !mounted {
+            anyhow::bail!("your models drive ({}) isn't connected. Plug it in, or move models back to this Mac in Settings › Storage", name.as_os_str().to_string_lossy());
+        }
+        Ok(())
     }
 
     pub fn kind_dir(&self, kind: crate::catalog::Kind) -> PathBuf {

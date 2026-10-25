@@ -6,6 +6,7 @@ pub mod engines;
 pub mod gateway;
 pub mod library;
 pub mod settings;
+pub mod storage;
 pub mod system;
 pub mod web;
 
@@ -18,6 +19,7 @@ pub struct Core {
     pub settings: Arc<RwLock<Settings>>,
     pub engines: Arc<engines::Engines>,
     pub downloads: Arc<download::Downloads>,
+    pub mover: Arc<storage::Mover>,
 }
 
 impl Core {
@@ -32,7 +34,7 @@ impl Core {
         for pid in engines::reap_orphan() {
             engines.note(format!("Stopped a model server left running by the last session (pid {pid})"));
         }
-        Arc::new(Core { settings, engines, downloads: Default::default() })
+        Arc::new(Core { settings, engines, downloads: Default::default(), mover: Default::default() })
     }
 
     /// Serves the API and runs the watchdog until the process ends.

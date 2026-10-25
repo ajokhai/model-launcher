@@ -27,6 +27,7 @@ use crate::download;
 use crate::engines::{estimate_gb, Engine, NotEnoughMemory};
 use crate::library::{self, Installed};
 use crate::settings::{outputs_dir, Settings};
+use crate::storage;
 use crate::system;
 use crate::web;
 use crate::Core;
@@ -92,6 +93,8 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/api/settings", post(update_settings))
         .route("/api/engines/install", post(install_engine))
         .route("/api/reveal", post(reveal))
+        .route("/api/drives", get(drives))
+        .route("/api/models/move", post(move_models))
         .route("/api/web/search", post(web_search))
         .route("/api/web/fetch", post(web_fetch))
         .layer(DefaultBodyLimit::max(200 << 20))
@@ -372,6 +375,8 @@ async fn status(State(core): State<Arc<Core>>) -> Json<Value> {
         "events": core.engines.events(),
         "engines": engines,
         "downloads": core.downloads.all(),
+        "models_move": core.mover.progress(),
+        "models_drive_error": s.models_drive_ready().err().map(|e| e.to_string()),
         "api_url": format!("http://127.0.0.1:{}/v1", s.api_port),
     }))
 }
@@ -495,6 +500,7 @@ struct ImportUrlReq {
 /// Downloads a model from links into ~/Models/<Kind>/<name>/.
 async fn import_url(State(core): State<Arc<Core>>, Json(req): Json<ImportUrlReq>) -> R<Json<Value>> {
     let s = settings(&core).await;
+    s.models_drive_ready()?;
     let id = download::folder_name(&req.name);
     let dir = s.kind_dir(kind_from(&req.kind)?).join(&id);
     core.downloads.start_urls(&id, dir.clone(), req.urls.clone())?;
@@ -515,6 +521,7 @@ struct ImportFileReq {
 /// one place without a second copy eating disk. Across disks it copies instead.
 async fn import_file(State(core): State<Arc<Core>>, Json(req): Json<ImportFileReq>) -> R<Json<Value>> {
     let s = settings(&core).await;
+    s.models_drive_ready()?;
     let id = download::folder_name(&req.name);
     let dir = s.kind_dir(kind_from(&req.kind)?).join(&id);
     std::fs::create_dir_all(&dir)?;
@@ -585,6 +592,53 @@ async fn save_settings(core: &Arc<Core>, patch: Value) -> anyhow::Result<Setting
         tokio::spawn(async move { core.engines.reload_chat().await });
     }
     Ok(new)
+}
+
+async fn drives(State(core): State<Arc<Core>>) -> Json<Value> {
+    let s = settings(&core).await;
+    Json(json!({ "models_dir": s.models_dir, "drives": storage::drives(&s.models_dir) }))
+}
+
+#[derive(Deserialize)]
+struct MoveReq {
+    /// A drive's Models folder, as /api/drives lists it.
+    path: PathBuf,
+}
+
+/// Moves every model to another drive (or back to this Mac). Chat models are unloaded first.
+async fn move_models(State(core): State<Arc<Core>>, Json(req): Json<MoveReq>) -> R<Json<Value>> {
+    let s = settings(&core).await;
+    s.models_drive_ready()?;
+    let listed = storage::drives(&s.models_dir).iter().any(|d| d["path"].as_str() == Some(&*req.path.to_string_lossy()));
+    if !listed {
+        bail_api("pick one of the drives listed in Settings › Storage")?;
+    }
+    let from = std::fs::canonicalize(&s.models_dir)?;
+    let to = req.path.clone();
+    if std::fs::canonicalize(&to).is_ok_and(|t| t == from) {
+        return Ok(Json(json!({ "ok": true, "moved": false })));
+    }
+    if to.read_dir().is_ok_and(|mut d| d.any(|e| e.is_ok_and(|e| e.file_name() != ".DS_Store" && e.file_name() != "About this folder.txt"))) && to != storage::home_models() {
+        bail_api(&format!("{} already has files in it; move or rename that folder first", to.display()))?;
+    }
+    if core.downloads.all().values().any(|d| !d.finished && d.error.is_none()) {
+        bail_api("wait for downloads to finish first")?;
+    }
+    core.engines.stop_chat("its models are moving to another drive").await;
+    storage::relink_home(&storage::home_models()); // ~/Models becomes a real folder for the move back
+    std::fs::create_dir_all(&to)?;
+    let c = core.clone();
+    let rt = tokio::runtime::Handle::current();
+    core.mover.start(from, to, move |dest| {
+        rt.block_on(async {
+            let _ = save_settings(&c, json!({ "models_dir": dest })).await;
+            storage::relink_home(&dest);
+            let s = settings(&c).await;
+            library::tidy(&s);
+            c.engines.note(format!("Models moved to {}", dest.display()));
+        });
+    })?;
+    Ok(Json(json!({ "ok": true, "moved": true })))
 }
 
 #[derive(Deserialize)]

@@ -177,6 +177,13 @@
           </label>
         </div>
         <div class="card">
+          <div class="card-title"><span class="dot violet"></span>Storage</div>
+          <p class="hint">Where models live. Put them on an external SSD to save space on this Mac; <code>~/Models</code> then links to the drive, so it's still easy to find.</p>
+          <div id="drives"></div>
+          <label class="toggle"><input type="checkbox" id="s-disk"><span>Use disk as extra memory</span></label>
+          <small class="note">Models bigger than your RAM budget load anyway and read their weights from the drive as needed, instead of holding them all in RAM. Replies are slower, much slower on a regular hard drive, so a fast SSD (Thunderbolt or USB4) is best. macOS doesn't let apps move swap to an external drive, so this is how a drive adds room for models.</small>
+        </div>
+        <div class="card">
           <div class="card-title"><span class="dot teal"></span>Speed and throttling</div>
           <label class="field">
             <span>CPU threads <b id="v-threads"></b></span>
@@ -215,6 +222,8 @@
           <p>Yes. Press <b>+ Add a model</b> in Library. You can paste a Hugging Face link and it downloads, choose files already on your Mac and they're moved into <code>~/Models</code>, or make a folder by hand. The window walks you through each, and the <a href="#" data-link="https://github.com/ajokhai/model-launcher/blob/main/docs/models.md#bring-your-own-model">docs</a> have a full example. Any GGUF chat model that llama.cpp supports works (Mistral, Phi, DeepSeek, Llama, Qwen and more), as do Whisper models and Stable Diffusion GGUF or safetensors files.</p></details>
         <details><summary>A model says it needs more RAM. Can I run it anyway?</summary>
           <p>Yes. Press <b>Chat</b> and choose <b>Run anyway</b> when it says there isn't enough memory. Your other chat models are unloaded first, and llama.cpp puts as much of the model on the GPU as fits and the rest on the CPU. It works, but expect slower replies, and other apps may slow down while it's loaded. The memory watchdog leaves a model you ran anyway alone, so unload it when you're done (or let it unload when idle).</p></details>
+        <details><summary>Can I use an external SSD for models, or as extra RAM?</summary>
+          <p>Yes. In <b>Settings › Storage</b>, plug in the drive and press <b>Move models here</b>. Your models move to the drive and <code>~/Models</code> links to it. Turn on <b>Use disk as extra memory</b> and models bigger than your RAM budget load anyway, reading their weights from the drive as needed. macOS doesn't let apps move swap to another drive, so it's not literally RAM: replies are slower, and a fast SSD (Thunderbolt or USB4) helps a lot.</p></details>
         <details><summary>Can models use the internet?</summary>
           <p>Yes, chat models can search the web and read pages. In a chat, the model calls <b>web_search</b> or <b>web_open_page</b> when a question needs something current, and you see each call. Searches go to DuckDuckGo with no account; pages are read as plain text, and addresses on your Mac or local network are blocked. Turn it off in <b>Settings › Internet access</b> to keep models fully offline.</p></details>
         <details><summary>Where are my models?</summary>

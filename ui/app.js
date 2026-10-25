@@ -413,6 +413,7 @@ function renderSettings() {
     $('s-gpu').checked = s.use_gpu;
     $('s-low').checked = s.low_priority;
     $('s-web').checked = s.web_access;
+    $('s-disk').checked = s.disk_memory;
     settingsDrawn = true;
   }
   $('v-budget').textContent = `${$('s-budget').value} GB`;
@@ -421,7 +422,32 @@ function renderSettings() {
   $('ram-note').textContent = `This Mac has ${gb(sys.ram_total_gb)}; ${gb(sys.ram_available_gb)} is free right now. Disk: ${gb(sys.disk_free_gb)} free.`;
   const names = { llama_server: ['llama.cpp', 'Chat'], llama_tts: ['llama.cpp TTS', 'Text to speech'], whisper_cli: ['whisper.cpp', 'Speech to text'], sd_cli: ['stable-diffusion.cpp', 'Images'] };
   $('engines').innerHTML = state.status.engines.map((e) => `<div class="engine"><div><b>${names[e.engine][0]}</b><div class="muted">${names[e.engine][1]}</div></div>${e.path ? '<span class="badge great">Installed</span>' : `<button class="btn primary" onclick="installEngine('${e.engine}')">Install</button>`}</div>`).join('');
+  renderDrives();
   $('events').innerHTML = state.status.events.map((e) => `<li>${esc(e)}</li>`).join('') || '<li>Nothing yet.</li>';
+}
+let drivesAt = 0;
+async function renderDrives() {
+  const mv = state.status.models_move;
+  if (mv && !mv.finished && !mv.error) {
+    $('drives').innerHTML = `<div class="drive"><div style="flex:1"><b>Moving models to ${esc(mv.to)}</b><div class="progress"><i style="width:${mv.total_gb ? (100 * mv.done_gb / mv.total_gb).toFixed(1) : 2}%"></i></div><div class="muted">${gb(mv.done_gb)} of ${gb(mv.total_gb)}. Models can't be used until it's done.</div></div></div>`;
+    return;
+  }
+  if (Date.now() - drivesAt < 5000 && state.drives) return drawDrives(mv);
+  drivesAt = Date.now();
+  try { state.drives = await api('/api/drives'); } catch { return; }
+  drawDrives(mv);
+}
+function drawDrives(mv) {
+  const err = state.status.models_drive_error;
+  $('drives').innerHTML = (err ? `<div class="muted" style="color:var(--red)">${esc(err)}</div>` : '') + (mv?.error ? `<div class="muted" style="color:var(--red)">The move stopped: ${esc(mv.error)}. Your models are still in the old place.</div>` : '') +
+    state.drives.drives.map((d) => `<div class="drive"><div style="flex:1"><b>${esc(d.name)}</b>${d.external ? '' : ' <span class="muted">(internal)</span>'}<div class="muted">${gb(d.free_gb)} free · ${esc(d.path)}</div></div>
+      ${d.current ? '<span class="badge great">Models are here</span>' : `<button class="btn" onclick="moveModels('${esc(d.path)}', '${esc(d.name)}')">Move models here</button>`}</div>`).join('') +
+    (state.drives.drives.length < 2 ? '<div class="muted">Plug in an external drive and it shows up here.</div>' : '');
+}
+async function moveModels(path, name) {
+  const used = state.library.reduce((t, m) => t + m.size_gb, 0);
+  if (!(await confirmDelete(`Move models to ${name}?`, `About ${gb(used)} is copied to ${path}, checked, and then removed from where it is now. Loaded chat models are unloaded first, and models can't be used until it's done.${name === 'This Mac' ? '' : '\n\nKeep the drive plugged in to use your models.'}`, 'Move models', false))) return;
+  try { await api('/api/models/move', { body: { path } }); drivesAt = 0; toast('Moving models…'); refresh(); } catch (e) { toast(e.message, true); }
 }
 async function installEngine(engine) {
   toast('Installing… this can take a minute');
@@ -437,14 +463,14 @@ function saveSettings() {
     try {
       await api('/api/settings', { body: {
         memory_budget_gb: +$('s-budget').value, context_size: +$('s-ctx').value, idle_unload_minutes: +$('s-idle').value, max_loaded: +$('s-max').value,
-        threads: +$('s-threads').value, use_gpu: $('s-gpu').checked, low_priority: $('s-low').checked, web_access: $('s-web').checked } });
+        threads: +$('s-threads').value, use_gpu: $('s-gpu').checked, low_priority: $('s-low').checked, web_access: $('s-web').checked, disk_memory: $('s-disk').checked } });
       state.catalog = await api('/api/catalog');
       toast('Saved');
       refresh();
     } catch (e) { toast(e.message, true); }
   }, 350);
 }
-['s-budget', 's-ctx', 's-idle', 's-max', 's-threads', 's-gpu', 's-low', 's-web'].forEach((id) => $(id).addEventListener('input', saveSettings));
+['s-budget', 's-ctx', 's-idle', 's-max', 's-threads', 's-gpu', 's-low', 's-web', 's-disk'].forEach((id) => $(id).addEventListener('input', saveSettings));
 
 refresh();
 setInterval(refresh, 2000);

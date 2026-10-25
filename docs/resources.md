@@ -13,6 +13,7 @@ Local models are memory hungry. Model Launcher keeps them inside limits you set 
 | CPU threads | Auto (all cores but two) | Threads each engine may use. Fewer leaves more for your other apps. |
 | Use the GPU | On | Runs models on the GPU with Metal. Off is slower and leaves the GPU free. |
 | Low priority | On | Runs engines at a lower CPU priority so whatever you're doing comes first. |
+| Use disk as extra memory | Off | Models bigger than the RAM budget load anyway and read their weights from the drive as needed (llama.cpp maps the model file into memory). Slower; a fast external SSD is best. |
 | Internet access | On | Lets chat models search the web (DuckDuckGo, no account) and read pages, through the `web_search` and `web_open_page` tools. Off keeps them fully offline; loaded models reload to apply the change. |
 
 ## How it's enforced
@@ -34,3 +35,9 @@ Chat models also run with flash attention and an 8-bit KV cache, which roughly h
 | Fits | Within your budget. |
 | Over budget | Your Mac could run it if you raise the budget. |
 | Too big | Needs more memory than this Mac has. |
+
+## Models on an external SSD
+
+Settings › Storage lists this Mac and every connected drive. **Move models here** copies every model to `<drive>/Models`, checks each file, then removes the originals; `~/Models` becomes a link to the drive so it's still easy to find. Move them back the same way. While the drive is unplugged, Model Launcher won't download or import (so nothing lands on this Mac by mistake) and says the drive isn't connected.
+
+macOS doesn't let apps put swap on an external drive, so a drive can't literally become RAM. What it can do is hold the model files: with **Use disk as extra memory** on, a model past the RAM budget loads anyway, and macOS reads its weights from the drive as they're needed instead of keeping them all in RAM. Expect slower replies, and keep the model on the fastest drive you have.

@@ -50,6 +50,7 @@ impl Downloads {
             return Ok(());
         }
         let s = settings.try_read().map(|s| s.clone()).unwrap_or_default();
+        s.models_drive_ready()?;
         let dir = s.kind_dir(model.kind).join(model.id);
         std::fs::create_dir_all(&dir)?;
         let free = system::free_disk_gb(&dir);

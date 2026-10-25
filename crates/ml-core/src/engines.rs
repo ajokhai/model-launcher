@@ -225,7 +225,7 @@ impl Engines {
     /// Loads a chat model. `force` skips the memory checks ("Run anyway"): every other chat model is
     /// unloaded first, and llama.cpp puts on the GPU only the layers that fit, the rest on the CPU.
     /// It runs slowly once macOS starts swapping, but it runs.
-    pub async fn load_chat(&self, m: &Installed, force: bool) -> Result<u16> {
+    pub async fn load_chat(&self, m: &Installed, mut force: bool) -> Result<u16> {
         if m.kind != Kind::Chat {
             bail!("{} isn't a chat model", m.name);
         }
@@ -242,6 +242,10 @@ impl Engines {
 
         let s = self.settings.read().await.clone();
         let need = estimate_gb(m, &s);
+        // "Use disk as extra memory": a model past the budget streams its weights from the drive
+        if need > s.memory_budget_gb && s.disk_memory {
+            force = true;
+        }
         if need > s.memory_budget_gb && !force {
             return Err(NotEnoughMemory(format!(
                 "{} needs about {:.1} GB, more than your {:.0} GB RAM budget. Raise the budget in Settings or pick a smaller model.",
@@ -265,6 +269,9 @@ impl Engines {
             stop_child(old.child).await;
         }
         let free = system::available_memory_gb() + self.current_job().map(|j| j.memory_gb).unwrap_or(0.0);
+        if need > free + 1.0 && s.disk_memory {
+            force = true;
+        }
         if need > free + 1.0 && !force {
             return Err(NotEnoughMemory(format!(
                 "{} needs about {:.1} GB but only {:.1} GB is free right now. Close some apps or unload a model, then try again.",
@@ -273,7 +280,8 @@ impl Engines {
             .into());
         }
         if force && need > free.min(s.memory_budget_gb) {
-            self.note(format!("Running {} anyway: it needs about {:.1} GB with {:.1} GB free, so expect it to be slow", m.name, need, free));
+            let how = if s.disk_memory { "reading weights from disk as needed" } else { "anyway" };
+            self.note(format!("Running {} {how}: it needs about {:.1} GB with {:.1} GB free, so expect it to be slower", m.name, need, free));
         }
 
         let bin = Engine::LlamaServer.path().ok_or_else(|| anyhow!("llama.cpp isn't installed yet (Settings › Engines)"))?;
