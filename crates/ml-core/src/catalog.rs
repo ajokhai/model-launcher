@@ -104,6 +104,14 @@ pub fn all() -> Vec<Model> {
             ],
         },
         Model {
+            id: "internvl3-14b", name: "InternVL3 14B", kind: Chat, maker: "OpenGVLab", vision: true,
+            blurb: "Bigger vision model trained on screenshots and GUIs. Wants a 12 GB budget.",
+            files: vec![
+                f("ggml-org/InternVL3-14B-Instruct-GGUF", "InternVL3-14B-Instruct-Q4_K_M.gguf", 8.99, Weights),
+                f("ggml-org/InternVL3-14B-Instruct-GGUF", "mmproj-InternVL3-14B-Instruct-Q8_0.gguf", 0.38, Projector),
+            ],
+        },
+        Model {
             id: "qwen3-8b", name: "Qwen3 8B", kind: Chat, maker: "Qwen", vision: false,
             blurb: "Text only, with a thinking mode for harder questions.",
             files: vec![f("Qwen/Qwen3-8B-GGUF", "Qwen3-8B-Q4_K_M.gguf", 5.03, Weights)],
@@ -217,6 +225,7 @@ pub fn attribution(m: &Model) -> Attribution {
     let (license, license_url, origin) = match m.id {
         "qwen3-vl-8b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-VL-8B-Instruct"),
         "qwen3-vl-4b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-VL-4B-Instruct"),
+        "internvl3-14b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "OpenGVLab/InternVL3-14B-Instruct"),
         "qwen3-8b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-8B"),
         "qwen3-4b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-4B"),
         "qwen3-14b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-14B"),

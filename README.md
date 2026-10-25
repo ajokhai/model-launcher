@@ -82,6 +82,7 @@ Model Launcher stands on [llama.cpp](https://github.com/ggml-org/llama.cpp) and 
 | Model | Made by | Original | License |
 |---|---|---|---|
 | Qwen3-VL 8B / 4B, Qwen3 14B / 8B / 4B, Qwen2.5 Coder 7B, Qwen2.5 1.5B | Qwen (Alibaba) | [Qwen on Hugging Face](https://huggingface.co/Qwen) | Apache 2.0 |
+| InternVL3 14B | OpenGVLab (Shanghai AI Lab) | [OpenGVLab/InternVL3-14B-Instruct](https://huggingface.co/OpenGVLab/InternVL3-14B-Instruct) (GGUF by [ggml-org](https://huggingface.co/ggml-org/InternVL3-14B-Instruct-GGUF)) | Apache 2.0 |
 | Gemma 3 12B / 4B | Google | [google/gemma-3-4b-it](https://huggingface.co/google/gemma-3-4b-it) | [Gemma Terms of Use](https://ai.google.dev/gemma/terms) |
 | Llama 3.2 3B | Meta | [meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct) (GGUF by [bartowski](https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF)) | [Llama 3.2 Community License](https://www.llama.com/llama3_2/license/) |
 | gpt-oss 20B | OpenAI | [openai/gpt-oss-20b](https://huggingface.co/openai/gpt-oss-20b) | Apache 2.0 |

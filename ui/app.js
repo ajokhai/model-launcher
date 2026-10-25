@@ -65,7 +65,7 @@ function source(m) {
 const MAKER_TINT = { Qwen: 'violet', Google: 'blue', Meta: 'indigo', OpenAI: 'sage', 'Stability AI': 'plum', OuteAI: 'green' };
 const tint = (m) => MAKER_TINT[m.maker] || 'gray';
 // The maker's own logo (their Hugging Face avatar, bundled in ui/logos), else a tinted monogram.
-const LOGOS = new Set(['Qwen', 'google', 'meta-llama', 'openai', 'stabilityai', 'OuteAI', 'Wan-AI']);
+const LOGOS = new Set(['Qwen', 'google', 'meta-llama', 'openai', 'stabilityai', 'OuteAI', 'Wan-AI', 'OpenGVLab']);
 function logo(m) {
   const org = (m.attribution?.origin || '').split('/')[0];
   if (LOGOS.has(org)) return `<div class="icon logo-img"><img src="logos/${org}.png" alt="${esc(m.maker)} logo"></div>`;
