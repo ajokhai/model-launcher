@@ -25,6 +25,9 @@ pub struct Settings {
     pub low_priority: bool,
     /// Port for the local OpenAI-compatible API (and the app's own UI).
     pub api_port: u16,
+    /// Chat models that may be loaded at the same time; 0 picks by this Mac's RAM. They still
+    /// have to fit the RAM budget together.
+    pub max_loaded: u32,
 }
 
 impl Default for Settings {
@@ -39,6 +42,7 @@ impl Default for Settings {
             idle_unload_minutes: 10,
             low_priority: true,
             api_port: 11500,
+            max_loaded: 0,
         }
     }
 }
@@ -68,6 +72,7 @@ impl Settings {
         self.memory_budget_gb = self.memory_budget_gb.clamp(1.0, (ram - 2.0).max(1.0));
         self.threads = self.threads.min(system::cpu_count() as u32);
         self.context_size = self.context_size.clamp(512, 131_072);
+        self.max_loaded = self.max_loaded.min(8);
         self
     }
 
@@ -76,6 +81,18 @@ impl Settings {
             self.threads
         } else {
             (system::cpu_count() as u32).saturating_sub(2).max(2)
+        }
+    }
+
+    pub fn effective_max_loaded(&self) -> u32 {
+        if self.max_loaded > 0 {
+            return self.max_loaded;
+        }
+        match system::total_memory_gb() {
+            r if r >= 48.0 => 4,
+            r if r >= 32.0 => 3,
+            r if r >= 24.0 => 2,
+            _ => 1,
         }
     }
 

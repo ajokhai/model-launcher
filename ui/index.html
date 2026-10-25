@@ -9,8 +9,8 @@
 <body>
   <header class="top" data-tauri-drag-region>
     <div class="brand" data-tauri-drag-region>
-      <img src="icon.png" alt="" class="logo">
-      <span>Model Launcher</span>
+      <img src="icon.png" alt="" class="logo" data-tauri-drag-region>
+      <span data-tauri-drag-region>Model Launcher</span>
     </div>
     <nav class="tabs" id="tabs">
       <button data-tab="library" class="on">Library</button>
@@ -20,7 +20,7 @@
       <button data-tab="settings">Settings</button>
       <button data-tab="help">Help</button>
     </nav>
-    <div class="meter" id="meter" title="Memory used by models / your budget">
+    <div class="meter" id="meter" title="RAM used by running models, out of your RAM budget (Settings)">
       <div class="meter-bar"><i id="meter-fill"></i></div>
       <span id="meter-text">–</span>
     </div>
@@ -34,9 +34,11 @@
       <div class="page-head">
         <div>
           <h1>Your models</h1>
-          <p class="sub">Everything lives in <a href="#" id="open-models">~/Models</a>, one folder per model. Launch one and it swaps in; only one chat model is loaded at a time.</p>
+          <p class="sub">Everything lives in <a href="#" id="open-models">~/Models</a>, one folder per model. Launch one and it loads; on a Mac with room, several stay loaded at once.</p>
         </div>
+        <button class="btn primary" id="add-open">+ Add a model</button>
       </div>
+      <div id="pending"></div>
       <div id="library"></div>
     </section>
 
@@ -45,13 +47,14 @@
       <div class="page-head">
         <div>
           <h1>Discover</h1>
-          <p class="sub">Open models picked to run well on a Mac. The badge says how each fits your memory budget.</p>
+          <p class="sub">Open models picked to run well on a Mac, downloaded straight from <a href="#" data-link="https://huggingface.co">huggingface.co</a>. Each card links its source and license; the badge says how it fits your memory budget. Want one that isn't here? Use <b>+ Add a model</b> in Library.</p>
         </div>
         <div class="filters" id="filters">
           <button data-kind="all" class="on">All</button>
           <button data-kind="chat">Chat</button>
           <button data-kind="voice">Voice</button>
           <button data-kind="image">Image</button>
+          <button data-kind="video">Video</button>
         </div>
       </div>
       <div class="grid" id="catalog"></div>
@@ -59,7 +62,7 @@
 
     <!-- Studio -->
     <section class="page" id="page-studio">
-      <div class="page-head"><div><h1>Studio</h1><p class="sub">Try voice and image models right here. The same features are in the API and MCP.</p></div></div>
+      <div class="page-head"><div><h1>Studio</h1><p class="sub">Try voice, image and video models right here. The same features are in the API and MCP.</p></div></div>
       <div class="studio">
         <div class="card">
           <div class="card-title"><span class="dot violet"></span>Speak</div>
@@ -91,27 +94,57 @@
           <p class="out" id="img-out"></p>
           <div class="gallery" id="gallery"></div>
         </div>
+        <div class="card wide">
+          <div class="card-title"><span class="dot violet"></span>Video</div>
+          <p class="hint">Describe a short clip. Video is the heaviest thing a Mac can run locally: a 2-second clip takes minutes.</p>
+          <div class="row">
+            <input id="vid-prompt" placeholder="A paper boat drifting down a rainy street, cinematic">
+            <select id="vid-len"><option value="1">1 s</option><option value="2" selected>2 s</option><option value="3">3 s</option></select>
+            <select id="vid-model"></select>
+            <button class="btn primary" id="vid-go">Create</button>
+          </div>
+          <p class="out" id="vid-out"></p>
+          <div class="gallery" id="vid-gallery"></div>
+        </div>
       </div>
     </section>
 
     <!-- Connect -->
     <section class="page" id="page-connect">
-      <div class="page-head"><div><h1>Connect</h1><p class="sub">Use your local models from other apps, through an OpenAI-compatible API or MCP.</p></div></div>
-      <div class="card">
-        <div class="card-title"><span class="dot orange"></span>API</div>
-        <p class="hint">Point any OpenAI SDK or app at this base URL. Any API key works; it never leaves this Mac. Naming a model swaps it in.</p>
-        <div class="copy"><code id="api-url">http://127.0.0.1:11500/v1</code><button class="btn ghost" data-copy="api-url">Copy</button></div>
-        <pre id="api-example"></pre>
-        <p class="hint">Endpoints: <code>/v1/models</code>, <code>/v1/chat/completions</code> (streaming too), <code>/v1/audio/transcriptions</code>, <code>/v1/audio/speech</code>, <code>/v1/images/generations</code>.</p>
-      </div>
-      <div class="card">
-        <div class="card-title"><span class="dot violet"></span>MCP</div>
-        <p class="hint">Gives Claude, Cursor and other MCP apps the tools <code>chat</code>, <code>transcribe</code>, <code>speak</code>, <code>generate_image</code>, <code>list_models</code>, <code>load_model</code> and <code>unload_model</code>.</p>
-        <div id="clients" class="clients"></div>
-        <p class="hint">Or add it by hand:</p>
-        <pre id="mcp-config"></pre>
-        <button class="btn ghost" data-copy="mcp-config">Copy config</button>
-        <p class="hint">Going the other way, the chat window can use MCP servers too: open a model's chat and use its <b>MCP</b> panel to add one.</p>
+      <div class="page-head"><div><h1>Connect</h1><p class="sub">Use your local models from other apps. Nothing leaves this Mac.</p></div></div>
+      <div class="connect">
+        <div class="card">
+          <div class="section-head"><div><div class="card-title">OpenAI-compatible API</div><p class="hint">For scripts, SDKs and apps that let you set a base URL. Any API key works.</p></div></div>
+          <div class="copy"><code id="api-url">http://127.0.0.1:11500/v1</code><button class="btn ghost sm" data-copy="api-url">Copy</button></div>
+          <div class="filters seg" id="code-tabs"><button data-lang="curl" class="on">curl</button><button data-lang="python">Python</button><button data-lang="js">JavaScript</button></div>
+          <pre id="api-example"></pre>
+          <table class="endpoints">
+            <tr><td><span class="verb">GET</span></td><td><code>/v1/models</code></td><td>Installed models</td></tr>
+            <tr><td><span class="verb">POST</span></td><td><code>/v1/chat/completions</code></td><td>Chat, with streaming and images</td></tr>
+            <tr><td><span class="verb">POST</span></td><td><code>/v1/audio/transcriptions</code></td><td>Speech to text</td></tr>
+            <tr><td><span class="verb">POST</span></td><td><code>/v1/audio/speech</code></td><td>Text to speech</td></tr>
+            <tr><td><span class="verb">POST</span></td><td><code>/v1/images/generations</code></td><td>Text to image</td></tr>
+            <tr><td><span class="verb">POST</span></td><td><code>/v1/videos/generations</code></td><td>Text to video</td></tr>
+          </table>
+        </div>
+        <div class="card">
+          <div class="section-head"><div><div class="card-title">MCP</div><p class="hint">Lets Claude, Cursor and other AI apps call your local models as tools.</p></div></div>
+          <div id="clients" class="clients"></div>
+          <div class="tools">
+            <div><code>chat</code><span>Ask a local chat model</span></div>
+            <div><code>transcribe</code><span>Audio file to text</span></div>
+            <div><code>speak</code><span>Text to a WAV file</span></div>
+            <div><code>generate_image</code><span>Prompt to a PNG</span></div>
+            <div><code>generate_video</code><span>Prompt to a WebM clip</span></div>
+            <div><code>list_models</code><span>What's installed and loaded</span></div>
+            <div><code>load_model</code> / <code>unload_model</code><span>Swap models ahead of time</span></div>
+          </div>
+          <details class="manual"><summary>Add it to another app by hand</summary>
+            <pre id="mcp-config"></pre>
+            <button class="btn ghost sm" data-copy="mcp-config">Copy config</button>
+          </details>
+          <p class="hint">The other way round, a model's chat window has its own <b>MCP</b> panel for giving that model tools.</p>
+        </div>
       </div>
     </section>
 
@@ -120,16 +153,21 @@
       <div class="page-head"><div><h1>Settings</h1><p class="sub">How much of this Mac models may use. Changes apply to the next model you load.</p></div></div>
       <div class="settings">
         <div class="card">
-          <div class="card-title"><span class="dot orange"></span>Memory</div>
+          <div class="card-title"><span class="dot orange"></span>Memory (RAM)</div>
           <label class="field">
-            <span>Memory budget <b id="v-budget"></b></span>
+            <span>RAM budget <b id="v-budget"></b></span>
             <input type="range" id="s-budget" min="1" max="14" step="1">
-            <small>The most memory models may use together. Bigger launches are refused, and a model that grows past it is stopped. <span id="ram-note"></span></small>
+            <small>Memory (RAM), not disk: the most RAM running models may use together. Bigger launches are refused, and a model that grows past it is stopped. <span id="ram-note"></span></small>
           </label>
           <label class="field">
             <span>Context size <b id="v-ctx"></b></span>
             <select id="s-ctx"><option value="2048">2,048 tokens</option><option value="4096">4,096 tokens</option><option value="8192">8,192 tokens</option><option value="16384">16,384 tokens</option><option value="32768">32,768 tokens</option></select>
             <small>How much of a conversation a chat model remembers. Each doubling costs more memory.</small>
+          </label>
+          <label class="field">
+            <span>Chat models at once</span>
+            <select id="s-max"><option value="0">Auto</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="6">6</option></select>
+            <small>How many chat models can stay loaded together. Together they still have to fit the RAM budget. <span id="max-note"></span></small>
           </label>
           <label class="field">
             <span>Unload when idle</span>
@@ -170,22 +208,67 @@
           <li>In <b>Library</b>, press <b>Chat</b>. The model loads and a chat window opens.</li>
           <li>For voice and images, get a Whisper, OuteTTS or SD Turbo model and try it in <b>Studio</b>.</li></ol>
           <p>Engines are installed for you the first time they're needed (Settings › Engines).</p></details>
+        <details><summary>Can I use a model that isn't in Discover?</summary>
+          <p>Yes. Press <b>+ Add a model</b> in Library. You can paste a Hugging Face link and it downloads, choose files already on your Mac and they're moved into <code>~/Models</code>, or make a folder by hand. The window walks you through each, and the <a href="#" data-link="https://github.com/ajokhai/model-launcher/blob/main/docs/models.md#bring-your-own-model">docs</a> have a full example. Any GGUF chat model that llama.cpp supports works (Mistral, Phi, DeepSeek, Llama, Qwen and more), as do Whisper models and Stable Diffusion GGUF or safetensors files.</p></details>
         <details><summary>Where are my models?</summary>
           <p>All in <code>~/Models</code>: <code>Chat</code>, <code>Voice</code> and <code>Image</code>, with one folder per model. To add a model from elsewhere, put its files in a new folder there (for example <code>~/Models/Chat/My Model/</code>). A <code>.gguf</code> plus an optional <code>mmproj-*.gguf</code> makes a chat model; a <code>ggml-*.bin</code> in Voice is a Whisper model. To remove one, use the trash button or delete its folder.</p></details>
         <details><summary>How does memory management work?</summary>
-          <p>You set a memory budget. Before loading, Model Launcher estimates what a model needs and refuses it if that's over the budget or more than is free. While it runs, a watchdog measures real memory every two seconds and stops anything that grows past the budget. Only one chat model is loaded at a time; voice and image jobs run one at a time and may unload the chat model to make room. Idle chat models unload on their own.</p></details>
+          <p>You set a memory budget. Before loading, Model Launcher estimates what a model needs and refuses it if that's over the budget or more than is free. While it runs, a watchdog measures real memory every two seconds and stops anything that grows past the budget. Several chat models can be loaded at once (Settings › Chat models at once) as long as together they fit the budget; when a new one doesn't fit, the least recently used one is unloaded. Voice and image jobs run one at a time and unload chat models the same way if they need room. Idle chat models unload on their own.</p></details>
         <details><summary>What do the fit badges mean?</summary>
           <p><span class="badge great">Runs great</span> uses under 75% of your budget. <span class="badge ok">Fits</span> is within budget. <span class="badge over">Over budget</span> means your Mac could run it if you raise the budget. <span class="badge too">Too big</span> needs more memory than this Mac has.</p></details>
         <details><summary>My Mac feels slow while a model runs</summary>
           <p>In Settings, lower <b>CPU threads</b>, keep <b>Low priority</b> on, lower <b>Context size</b>, or pick a smaller model. Quitting Model Launcher always frees all model memory.</p></details>
         <details><summary>Using models from other apps</summary>
           <p>See <b>Connect</b>. Any OpenAI-compatible app can use <code>http://127.0.0.1:11500/v1</code>. MCP apps like Claude and Cursor can be connected with one click. Only this Mac can reach the API, and web pages can't.</p></details>
+        <details><summary>Where do the models come from?</summary>
+          <p>Every model in Discover is a direct download from <a href="#" data-link="https://huggingface.co">Hugging Face</a>, made by the lab named on its card. Each card's <b>Source</b> line links the original model, the repo its files come from (often an official GGUF conversion, or a community one such as bartowski's), and its license. Licenses differ: Apache 2.0 and MIT models are free for any use, while Gemma, Llama 3.2, Stability AI and OuteTTS (non-commercial) have their own terms. Read them before commercial use.</p>
+          <p>Models run on open-source engines: <a href="#" data-link="https://github.com/ggml-org/llama.cpp">llama.cpp</a> and <a href="#" data-link="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a> by ggml.ai, and <a href="#" data-link="https://github.com/leejet/stable-diffusion.cpp">stable-diffusion.cpp</a> by leejet, all MIT licensed. Model Launcher is MIT licensed too.</p></details>
+        <details><summary>Unimodal or multimodal?</summary>
+          <p>Each card shows what a model takes in and gives back. <b>Unimodal</b> models work in one kind of data (text in, text out). <b>Multimodal</b> ones cross kinds: text and images in (vision chat models), audio to text (Whisper), text to audio (OuteTTS), text to an image (Stable Diffusion) or text to video (Wan).</p></details>
         <details><summary>A model won't load</summary>
           <p>Check Settings › Activity for the reason. Logs are in <code>~/Library/Application Support/Model Launcher/logs</code>. Make sure the engine shows as installed in Settings › Engines.</p></details>
       </div>
     </section>
   </main>
 
+  <div class="modal" id="add" hidden>
+    <div class="modal-card add-card">
+      <div class="row"><h3 style="flex:1">Add a model from anywhere</h3><button class="btn icon-only" id="add-close">Close</button></div>
+      <p class="hint">Bring any open model that runs on llama.cpp, whisper.cpp or stable-diffusion.cpp. It goes into <code>~/Models</code> with the rest.</p>
+      <div class="filters" id="add-tabs"><button data-way="link" class="on">From a link</button><button data-way="file">From this Mac</button><button data-way="folder">By hand</button></div>
+
+      <div class="way" id="way-link">
+        <ol class="steps">
+          <li>Find the model on <a href="#" data-link="https://huggingface.co/models?library=gguf&sort=trending">Hugging Face</a> (search for its name plus <b>GGUF</b>). Official labs often publish their own GGUF, and trusted community converters include <a href="#" data-link="https://huggingface.co/bartowski">bartowski</a>, <a href="#" data-link="https://huggingface.co/unsloth">unsloth</a> and <a href="#" data-link="https://huggingface.co/ggml-org">ggml-org</a>.</li>
+          <li>Open <b>Files and versions</b> and pick one file. <b>Q4_K_M</b> is the best balance of size and quality; the file should be smaller than your memory budget.</li>
+          <li>Copy the file's link (the page link or the download link both work) and paste it below. For a vision model, also paste its <code>mmproj</code> file.</li>
+        </ol>
+        <textarea id="add-urls" rows="3" placeholder="https://huggingface.co/Qwen/Qwen3-4B-GGUF/blob/main/Qwen3-4B-Q4_K_M.gguf"></textarea>
+      </div>
+      <div class="way" id="way-file" hidden>
+        <ol class="steps">
+          <li>Have the model files on this Mac: a <code>.gguf</code> for chat (plus an <code>mmproj-*.gguf</code> for vision), a <code>ggml-*.bin</code> for Whisper, or a <code>.gguf</code> / <code>.safetensors</code> for images. Models from LM Studio, Ollama exports or a download folder all work.</li>
+          <li>Choose them below. They're <b>moved</b> into <code>~/Models</code>, not copied, so they don't take up space twice.</li>
+        </ol>
+        <div class="row"><button class="btn ghost" id="add-pick">Choose files…</button><span class="muted" id="add-picked">No files chosen</span></div>
+      </div>
+      <div class="way" id="way-folder" hidden>
+        <ol class="steps">
+          <li>Open <a href="#" id="add-reveal">~/Models</a> and go into <code>Chat</code>, <code>Voice</code> or <code>Image</code>.</li>
+          <li>Make a new folder named after the model, for example <code>Chat/Mistral 7B</code>.</li>
+          <li>Put the model's files in it. A chat folder needs one <code>.gguf</code>, plus an optional <code>mmproj-*.gguf</code> for vision. A voice folder needs a Whisper <code>ggml-*.bin</code>, or a TTS <code>.gguf</code> with its <code>WavTokenizer*.gguf</code>. An image folder needs one <code>.gguf</code> or <code>.safetensors</code>.</li>
+          <li>Come back here. It shows up in Library within a couple of seconds, and the folder name is its id in the API and MCP.</li>
+        </ol>
+      </div>
+
+      <div class="row add-meta" id="add-meta">
+        <input id="add-name" placeholder="Name, e.g. Mistral 7B">
+        <select id="add-kind"><option value="chat">Chat</option><option value="voice">Voice</option><option value="image">Image</option><option value="video">Video</option></select>
+        <button class="btn primary" id="add-go">Add</button>
+      </div>
+      <p class="hint">Check the model's license on its page before using it commercially. Only add files from sources you trust: model files are data, but a bad conversion can crash its engine.</p>
+    </div>
+  </div>
   <div class="toast" id="toast"></div>
   <div class="modal" id="modal" hidden>
     <div class="modal-card">

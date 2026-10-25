@@ -44,6 +44,22 @@ fn open_url(url: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Lets the person pick model files with the standard macOS file dialog; returns their paths.
+#[tauri::command]
+fn pick_files() -> Vec<String> {
+    let script = r#"set fs to choose file with prompt "Choose model files (.gguf, .bin or .safetensors)" with multiple selections allowed
+set out to ""
+repeat with f in fs
+set out to out & POSIX path of f & linefeed
+end repeat
+return out"#;
+    std::process::Command::new("/usr/bin/osascript")
+        .args(["-e", script])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().filter(|l| !l.is_empty()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
 /// The MCP server binary that ships inside the app.
 fn mcp_path() -> PathBuf {
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)).unwrap_or_default();
@@ -112,7 +128,7 @@ fn main() {
     let serving = core.clone();
     let app = tauri::Builder::default()
         .manage(App { core: core.clone() })
-        .invoke_handler(tauri::generate_handler![open_chat, open_url, mcp_info, connect_client])
+        .invoke_handler(tauri::generate_handler![open_chat, open_url, pick_files, mcp_info, connect_client])
         .setup(move |app| {
             let stopping = serving.clone();
             tauri::async_runtime::spawn(async move {

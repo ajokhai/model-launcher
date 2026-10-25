@@ -34,6 +34,10 @@ curl http://127.0.0.1:11500/v1/audio/speech -H "Content-Type: application/json" 
 
 `POST /v1/images/generations` takes `{"prompt": "...", "model": "sd-turbo", "size": "512x512"}`, plus optional `steps`, `seed` and `negative_prompt`. It returns `{"data": [{"b64_json": "...", "path": "..."}]}`. Sizes run from 256 to 1024 in steps of 64. Turbo models default to 4 steps, others to 20.
 
+## Video
+
+`POST /v1/videos/generations` takes `{"prompt": "...", "model": "wan2.1-t2v-1.3b"}`, plus optional `seconds` (1 to 5, default 2), `size` (default `480x272`), `steps`, `seed` and `negative_prompt`. It returns `{"data": [{"b64_webm": "...", "path": "...", "frames": 33, "size": "480x272"}]}`. This endpoint isn't part of OpenAI's API. Video is slow on a laptop: expect minutes per clip.
+
 ## Model Launcher's own endpoints
 
 These are what the app's window and the MCP server use.
@@ -44,7 +48,9 @@ These are what the app's window and the MCP server use.
 | `GET /api/library` | Installed models, with estimated memory need and fit |
 | `GET /api/catalog` | Downloadable models, with fit and whether they're installed |
 | `POST /api/launch {"id"}` | Load a chat model; returns its chat page URL |
-| `POST /api/stop` | Unload the chat model |
+| `POST /api/stop {"id"?}` | Unload one chat model, or all of them |
+| `POST /api/import/url {"name","kind","urls"}` | Download a model from any links into `~/Models` |
+| `POST /api/import/file {"name","kind","paths"}` | Move model files already on this Mac into `~/Models` |
 | `POST /api/download {"id"}`, `/api/download/cancel` | Download a catalog model, or cancel it |
 | `POST /api/delete {"id"}` | Delete a model's folder |
 | `POST /api/settings {...}` | Change settings (any subset of the fields in `/api/status`) |

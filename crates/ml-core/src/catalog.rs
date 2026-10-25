@@ -14,6 +14,8 @@ pub enum Kind {
     Speak,
     /// Text to image through stable-diffusion.cpp.
     Image,
+    /// Text to video through stable-diffusion.cpp (Wan).
+    Video,
 }
 
 impl Kind {
@@ -22,6 +24,7 @@ impl Kind {
             Kind::Chat => "Chat",
             Kind::Transcribe | Kind::Speak => "Voice",
             Kind::Image => "Image",
+            Kind::Video => "Video",
         }
     }
 }
@@ -34,6 +37,10 @@ pub enum Role {
     Projector,
     /// Turns a TTS model's tokens into audio.
     Vocoder,
+    /// Reads the prompt for a video model (Wan's umt5).
+    TextEncoder,
+    /// Turns a video model's latents into frames.
+    Vae,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -47,6 +54,11 @@ pub struct File {
 impl File {
     pub fn url(&self) -> String {
         format!("https://huggingface.co/{}/resolve/main/{}", self.repo, self.name)
+    }
+
+    /// The name it's saved under (a file can sit in a subfolder of its repo).
+    pub fn local_name(&self) -> &'static str {
+        self.name.rsplit('/').next().unwrap_or(self.name)
     }
 }
 
@@ -166,6 +178,15 @@ pub fn all() -> Vec<Model> {
             ],
         },
         Model {
+            id: "wan2.1-t2v-1.3b", name: "Wan 2.1 1.3B", kind: Video, maker: "Wan (Alibaba)", vision: false,
+            blurb: "Short video clips from a prompt. Slow on a laptop: expect minutes per clip.",
+            files: vec![
+                f("samuelchristlie/Wan2.1-T2V-1.3B-GGUF", "Wan2.1-T2V-1.3B-Q4_K_M.gguf", 0.98, Weights),
+                f("city96/umt5-xxl-encoder-gguf", "umt5-xxl-encoder-Q4_K_M.gguf", 3.66, TextEncoder),
+                f("Comfy-Org/Wan_2.1_ComfyUI_repackaged", "split_files/vae/wan_2.1_vae.safetensors", 0.25, Vae),
+            ],
+        },
+        Model {
             id: "sd-turbo", name: "SD Turbo", kind: Image, maker: "Stability AI", vision: false,
             blurb: "Makes a 512 px image in a few steps. The quickest image model.",
             files: vec![f("Green-Sky/SD-Turbo-GGUF", "sd_turbo-f16-q8_0.gguf", 2.02, Weights)],
@@ -180,4 +201,37 @@ pub fn all() -> Vec<Model> {
 
 pub fn get(id: &str) -> Option<Model> {
     all().into_iter().find(|m| m.id == id)
+}
+
+/// Where a model comes from, for attribution: its license (as its Hugging Face card states it), the
+/// original model it was converted from, and the repo the files are downloaded from.
+#[derive(Clone, Debug, Serialize)]
+pub struct Attribution {
+    pub license: &'static str,
+    pub license_url: &'static str,
+    pub origin: &'static str,
+    pub download_repo: &'static str,
+}
+
+pub fn attribution(m: &Model) -> Attribution {
+    let (license, license_url, origin) = match m.id {
+        "qwen3-vl-8b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-VL-8B-Instruct"),
+        "qwen3-vl-4b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-VL-4B-Instruct"),
+        "qwen3-8b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-8B"),
+        "qwen3-4b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-4B"),
+        "qwen3-14b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen3-14B"),
+        "gemma-3-4b" => ("Gemma Terms of Use", "https://ai.google.dev/gemma/terms", "google/gemma-3-4b-it"),
+        "gemma-3-12b" => ("Gemma Terms of Use", "https://ai.google.dev/gemma/terms", "google/gemma-3-12b-it"),
+        "qwen2.5-coder-7b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen2.5-Coder-7B-Instruct"),
+        "llama-3.2-3b" => ("Llama 3.2 Community License", "https://www.llama.com/llama3_2/license/", "meta-llama/Llama-3.2-3B-Instruct"),
+        "qwen2.5-1.5b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Qwen/Qwen2.5-1.5B-Instruct"),
+        "gpt-oss-20b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "openai/gpt-oss-20b"),
+        "whisper-base-en" | "whisper-small-en" | "whisper-large-v3-turbo" => ("MIT", "https://opensource.org/license/mit", "openai/whisper"),
+        "outetts-0.2" => ("CC BY-NC 4.0 (non-commercial)", "https://creativecommons.org/licenses/by-nc/4.0/", "OuteAI/OuteTTS-0.2-500M"),
+        "wan2.1-t2v-1.3b" => ("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0", "Wan-AI/Wan2.1-T2V-1.3B"),
+        "sd-turbo" => ("Stability AI Community License", "https://stability.ai/community-license-agreement", "stabilityai/sd-turbo"),
+        "sd-1.5" => ("CreativeML OpenRAIL-M", "https://huggingface.co/spaces/CompVis/stable-diffusion-license", "runwayml/stable-diffusion-v1-5"),
+        _ => ("See the model card", "", ""),
+    };
+    Attribution { license, license_url, origin, download_repo: m.files[0].repo }
 }

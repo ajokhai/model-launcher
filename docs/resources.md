@@ -6,7 +6,8 @@ Local models are memory hungry. Model Launcher keeps them inside limits you set 
 
 | Setting | Default | What it does |
 |---|---|---|
-| Memory budget | half your RAM | The most memory all running models may use together. |
+| RAM budget | half your RAM | The most memory (RAM, not disk) all running models may use together. Disk space is checked separately, before each download. |
+| Chat models at once | Auto | How many chat models can stay loaded together, still within the RAM budget. |
 | Context size | 8,192 tokens | How much of a conversation a chat model keeps in memory. Each doubling costs more memory. |
 | Unload when idle | 10 minutes | Unloads a chat model nobody has used for this long. It reloads on the next message. |
 | CPU threads | Auto (all cores but two) | Threads each engine may use. Fewer leaves more for your other apps. |
@@ -16,7 +17,7 @@ Local models are memory hungry. Model Launcher keeps them inside limits you set 
 ## How it's enforced
 
 1. **Before loading**, Model Launcher estimates what the model needs: its files plus working memory (the KV cache for chat, which grows with context size). It refuses the launch if that's over your budget, or more than is free right now, and says why.
-2. **One chat model at a time.** Loading another one unloads the current one first (hot swap).
+2. **Several chat models at once.** Models stay loaded together while they fit the budget and the **Chat models at once** limit (Auto: 1 under 24 GB of RAM, 2 at 24 GB, 3 at 32 GB, 4 at 48 GB or more). When a new one doesn't fit, the least recently used one is unloaded first.
 3. **Voice and image jobs run one at a time.** If a job plus the loaded chat model would exceed the budget, the chat model is unloaded first. It reloads on the next chat.
 4. **A watchdog** measures each model's real memory every two seconds (the larger of its footprint and its resident memory, so GPU buffers and mapped weights both count). Anything that grows past the budget, plus 10% grace for loading spikes, is stopped, and Settings › Activity says so.
 5. **Idle unload** frees a chat model after the idle time you picked.

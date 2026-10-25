@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "The main window may call the app's own commands",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

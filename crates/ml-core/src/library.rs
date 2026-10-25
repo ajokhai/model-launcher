@@ -20,12 +20,14 @@ pub struct Installed {
     pub weights: PathBuf,
     pub projector: Option<PathBuf>,
     pub vocoder: Option<PathBuf>,
+    pub text_encoder: Option<PathBuf>,
+    pub vae: Option<PathBuf>,
     pub size_gb: f64,
     pub vision: bool,
     pub from_catalog: bool,
 }
 
-const KINDS: [Kind; 3] = [Kind::Chat, Kind::Transcribe, Kind::Image];
+const KINDS: [Kind; 4] = [Kind::Chat, Kind::Transcribe, Kind::Image, Kind::Video];
 
 fn size_gb(p: &Path) -> f64 {
     std::fs::metadata(p).map(|m| m.len() as f64 / 1024f64.powi(3)).unwrap_or(0.0)
@@ -63,12 +65,16 @@ fn read_model(folder_kind: Kind, dir: &Path) -> Option<Installed> {
     let find = |n: &str| files.iter().find(|p| name_of(p) == n).cloned();
 
     if let Some(m) = catalog::get(&id) {
-        if m.files.iter().all(|f| find(f.name).is_some()) {
-            let pick = |role: Role| m.files.iter().find(|f| f.role == role).and_then(|f| find(f.name));
+        if m.files.iter().all(|f| find(f.local_name()).is_some()) {
+            let pick = |role: Role| m.files.iter().find(|f| f.role == role).and_then(|f| find(f.local_name()));
             let weights = pick(Role::Weights)?;
             let projector = pick(Role::Projector);
             let vocoder = pick(Role::Vocoder);
+            let text_encoder = pick(Role::TextEncoder);
+            let vae = pick(Role::Vae);
             return Some(Installed {
+                text_encoder,
+                vae,
                 id,
                 name: m.name.to_string(),
                 kind: m.kind,
@@ -87,13 +93,14 @@ fn read_model(folder_kind: Kind, dir: &Path) -> Option<Installed> {
     let lower = |p: &PathBuf| name_of(p).to_lowercase();
     let projector = files.iter().find(|p| lower(p).starts_with("mmproj")).cloned();
     let vocoder = files.iter().find(|p| lower(p).contains("wavtokenizer")).cloned();
-    let weights = files
-        .iter()
-        .find(|p| Some(*p) != projector.as_ref() && Some(*p) != vocoder.as_ref())?
-        .clone();
+    let text_encoder = files.iter().find(|p| lower(p).contains("umt5") || lower(p).contains("t5xxl")).cloned();
+    let vae = files.iter().find(|p| lower(p).contains("vae")).cloned();
+    let extras = [&projector, &vocoder, &text_encoder, &vae];
+    let weights = files.iter().find(|p| extras.iter().all(|e| e.as_ref() != Some(*p)))?.clone();
     let kind = match folder_kind {
         Kind::Chat => Kind::Chat,
         Kind::Image => Kind::Image,
+        Kind::Video => Kind::Video,
         _ if lower(&weights).ends_with(".bin") => Kind::Transcribe,
         _ => Kind::Speak,
     };
@@ -108,6 +115,8 @@ fn read_model(folder_kind: Kind, dir: &Path) -> Option<Installed> {
         weights,
         projector,
         vocoder,
+        text_encoder,
+        vae,
         from_catalog: false,
     })
 }
@@ -145,7 +154,8 @@ pub fn tidy(s: &Settings) -> Vec<String> {
         "Model Launcher keeps every model here.\n\n\
          Chat/   language models (llama.cpp .gguf)\n\
          Voice/  speech to text (whisper .bin) and text to speech (.gguf)\n\
-         Image/  image models (.gguf or .safetensors)\n\n\
+         Image/  image models (.gguf or .safetensors)\n\
+         Video/  video models (Wan: model .gguf, umt5 text encoder, VAE)\n\n\
          Each model has its own folder. Drop a folder in to add a model, delete it to remove one.\n",
     );
     let catalog = catalog::all();
@@ -155,7 +165,7 @@ pub fn tidy(s: &Settings) -> Vec<String> {
     }
     for p in strays.into_iter().filter(|p| is_model_file(p)) {
         let n = name_of(&p);
-        let (kind, folder) = match catalog.iter().find(|m| m.files.iter().any(|f| f.name == n)) {
+        let (kind, folder) = match catalog.iter().find(|m| m.files.iter().any(|f| f.local_name() == n)) {
             Some(m) => (m.kind, m.id.to_string()),
             None => {
                 let l = n.to_lowercase();

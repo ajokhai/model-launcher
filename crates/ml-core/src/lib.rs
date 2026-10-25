@@ -28,7 +28,7 @@ impl Core {
         for m in moved {
             engines.note(format!("Moved {m}"));
         }
-        if let Some(pid) = engines::reap_orphan() {
+        for pid in engines::reap_orphan() {
             engines.note(format!("Stopped a model server left running by the last session (pid {pid})"));
         }
         Arc::new(Core { settings, engines, downloads: Default::default() })

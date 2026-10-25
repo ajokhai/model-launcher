@@ -65,7 +65,7 @@ impl Downloads {
             let client = reqwest::Client::new();
             let mut done_before = 0.0;
             for file in &model.files {
-                let dest = dir.join(file.name);
+                let dest = dir.join(file.local_name());
                 if dest.is_file() {
                     done_before += file.size_gb;
                     continue;
@@ -86,9 +86,71 @@ impl Downloads {
         Ok(())
     }
 
+    /// Downloads model files from any https link (a Hugging Face "resolve" or "blob" link, or any
+    /// direct link to a .gguf, .bin or .safetensors) into `dir`, tracked under `id`.
+    pub fn start_urls(self: &Arc<Self>, id: &str, dir: std::path::PathBuf, urls: Vec<String>) -> Result<()> {
+        let mut files = Vec::new();
+        for u in urls.iter().map(|u| u.trim()).filter(|u| !u.is_empty()) {
+            let url = normalize_url(u)?;
+            let name = url.rsplit('/').next().unwrap_or_default().split('?').next().unwrap_or_default().to_string();
+            if !(name.ends_with(".gguf") || name.ends_with(".bin") || name.ends_with(".safetensors")) {
+                bail!("{name} isn't a model file. Link straight to a .gguf, .bin or .safetensors file.");
+            }
+            files.push((url, name));
+        }
+        if files.is_empty() {
+            bail!("paste at least one link to a model file");
+        }
+        std::fs::create_dir_all(&dir)?;
+        if system::free_disk_gb(&dir) < 2.0 {
+            bail!("less than 2 GB of disk is free; make room first");
+        }
+        self.cancelled.lock().unwrap().retain(|c| c != id);
+        self.set(id, |p| *p = Progress::default());
+        let me = self.clone();
+        let id = id.to_string();
+        tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            // sizes come from the server, so the progress bar is real before the first byte
+            let mut total = 0.0;
+            for (url, _) in &files {
+                if let Ok(r) = client.head(url).send().await {
+                    // Hugging Face redirects to a CDN and states the size in x-linked-size
+                    let linked = r.headers().get("x-linked-size").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
+                    total += linked.or(r.content_length()).unwrap_or(0) as f64 / GB;
+                }
+            }
+            if total > 0.0 && total + 1.0 > system::free_disk_gb(&dir) {
+                me.set(&id, |p| p.error = Some(format!("needs {total:.1} GB of disk, more than is free")));
+                return;
+            }
+            me.set(&id, |p| p.total_gb = total.max(0.01));
+            let mut done = 0.0;
+            for (url, name) in &files {
+                match me.fetch(&client, &id, url, &dir.join(name), done).await {
+                    Ok(bytes) => done += bytes as f64 / GB,
+                    Err(e) => {
+                        me.set(&id, |p| p.error = Some(e.to_string()));
+                        return;
+                    }
+                }
+            }
+            me.set(&id, |p| {
+                p.finished = true;
+                p.done_gb = done;
+                p.total_gb = done;
+            });
+        });
+        Ok(())
+    }
+
     async fn fetch(&self, client: &reqwest::Client, id: &str, url: &str, dest: &Path, before_gb: f64) -> Result<u64> {
         let part = dest.with_extension("part");
         let resp = client.get(url).send().await?.error_for_status()?;
+        if let Some(len) = resp.content_length() {
+            let need = before_gb + len as f64 / GB;
+            self.set(id, |p| if p.total_gb < need { p.total_gb = need });
+        }
         let mut file = tokio::fs::File::create(&part).await?;
         let mut stream = resp.bytes_stream();
         let mut got: u64 = 0;
@@ -187,4 +249,24 @@ fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
         }
     }
     out
+}
+
+/// Turns a Hugging Face page link (…/blob/main/file.gguf) into its download link (…/resolve/…).
+fn normalize_url(u: &str) -> Result<String> {
+    if !u.starts_with("https://") {
+        bail!("{u} isn't an https link");
+    }
+    Ok(if u.contains("huggingface.co/") { u.replacen("/blob/", "/resolve/", 1) } else { u.to_string() })
+}
+
+/// A folder name that's safe and readable: letters, digits, spaces, dots, dashes and underscores.
+pub fn folder_name(name: &str) -> String {
+    let clean: String = name
+        .chars()
+        .filter(|c| !"()[]{}".contains(*c))
+        .map(|c| if c.is_alphanumeric() || " ._-".contains(c) { c } else { '-' })
+        .collect();
+    let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    let clean = clean.trim_matches(|c: char| c == '.' || c == ' ' || c == '-').to_string();
+    if clean.is_empty() { "My model".into() } else { clean }
 }

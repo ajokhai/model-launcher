@@ -103,10 +103,15 @@ fn tools() -> Value {
               "prompt": { "type": "string" }, "model": { "type": "string" },
               "size": { "type": "string", "description": "WIDTHxHEIGHT, e.g. 512x512" },
               "steps": { "type": "integer" } }, "required": ["prompt"] } },
-        { "name": "load_model", "description": "Load a chat model now (unloading the current one) so the next chat is instant.",
+        { "name": "generate_video", "description": "Make a short video clip with a local model (Wan). Slow: minutes per clip. Returns the WebM's path.",
+          "inputSchema": { "type": "object", "properties": {
+              "prompt": { "type": "string" }, "model": { "type": "string" },
+              "seconds": { "type": "number", "description": "1 to 5, default 2" },
+              "size": { "type": "string", "description": "WIDTHxHEIGHT, default 480x272" } }, "required": ["prompt"] } },
+        { "name": "load_model", "description": "Load a chat model now so the next chat is instant. Others stay loaded while they fit the RAM budget.",
           "inputSchema": { "type": "object", "properties": { "model": { "type": "string" } }, "required": ["model"] } },
-        { "name": "unload_model", "description": "Unload the chat model and free its memory.",
-          "inputSchema": { "type": "object", "properties": {} } }
+        { "name": "unload_model", "description": "Unload a chat model (or all of them, with no model given) and free its memory.",
+          "inputSchema": { "type": "object", "properties": { "model": { "type": "string" } } } }
     ])
 }
 
@@ -135,10 +140,8 @@ fn call(name: &str, a: &Value) -> Result<String, String> {
             if lines.is_empty() {
                 lines.push("No models installed. Open Model Launcher › Discover to get some.".into());
             }
-            lines.push(match st["running"]["name"].as_str() {
-                Some(n) => format!("Loaded chat model: {n}"),
-                None => "No chat model loaded.".into(),
-            });
+            let loaded: Vec<&str> = st["running"].as_array().into_iter().flatten().filter_map(|r| r["name"].as_str()).collect();
+            lines.push(if loaded.is_empty() { "No chat model loaded.".into() } else { format!("Loaded chat models: {}", loaded.join(", ")) });
             lines.push(format!("Memory budget: {:.0} GB", st["settings"]["memory_budget_gb"].as_f64().unwrap_or(0.0)));
             Ok(lines.join("\n"))
         }
@@ -208,12 +211,26 @@ fn call(name: &str, a: &Value) -> Result<String, String> {
             let r = api("POST", "/v1/images/generations", Some(&body), long)?;
             Ok(format!("Saved {}", r["data"][0]["path"].as_str().unwrap_or("?")))
         }
+        "generate_video" => {
+            let mut body = json!({ "prompt": s("prompt").unwrap_or_default() });
+            for k in ["model", "size"] {
+                if let Some(v) = s(k) {
+                    body[k] = json!(v);
+                }
+            }
+            if let Some(n) = a["seconds"].as_f64() {
+                body["seconds"] = json!(n);
+            }
+            let r = api("POST", "/v1/videos/generations", Some(&body), Duration::from_secs(3600))?;
+            Ok(format!("Saved {}", r["data"][0]["path"].as_str().unwrap_or("?")))
+        }
         "load_model" => {
             let r = api("POST", "/api/launch", Some(&json!({ "id": s("model").unwrap_or_default() })), long)?;
             Ok(format!("{} is loaded. Its chat page: {}", r["name"].as_str().unwrap_or(""), r["url"].as_str().unwrap_or("")))
         }
         "unload_model" => {
-            api("POST", "/api/stop", None, Duration::from_secs(30))?;
+            let body = match s("model") { Some(m) => json!({ "id": m }), None => json!({}) };
+            api("POST", "/api/stop", Some(&body), Duration::from_secs(30))?;
             Ok("Unloaded.".into())
         }
         _ => Err(format!("unknown tool {name}")),
@@ -223,7 +240,7 @@ fn call(name: &str, a: &Value) -> Result<String, String> {
 fn main() {
     if std::env::args().any(|a| a == "--help" || a == "-h") {
         println!(
-            "model-launcher-mcp {VERSION}\nMCP server (stdio) for Model Launcher. Add it to an MCP client as a stdio server whose command is this file's path.\nTools: list_models, chat, transcribe, speak, generate_image, load_model, unload_model."
+            "model-launcher-mcp {VERSION}\nMCP server (stdio) for Model Launcher. Add it to an MCP client as a stdio server whose command is this file's path.\nTools: list_models, chat, transcribe, speak, generate_image, generate_video, load_model, unload_model."
         );
         return;
     }

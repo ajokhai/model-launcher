@@ -73,6 +73,7 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/v1/audio/transcriptions", post(transcribe))
         .route("/v1/audio/speech", post(speak))
         .route("/v1/images/generations", post(image))
+        .route("/v1/videos/generations", post(video))
         .route("/api/status", get(status))
         .route("/api/library", get(library_list))
         .route("/api/catalog", get(catalog_list))
@@ -80,6 +81,8 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/api/stop", post(stop))
         .route("/api/download", post(download_start))
         .route("/api/download/cancel", post(download_cancel))
+        .route("/api/import/url", post(import_url))
+        .route("/api/import/file", post(import_file))
         .route("/api/delete", post(delete))
         .route("/api/settings", post(update_settings))
         .route("/api/engines/install", post(install_engine))
@@ -108,7 +111,7 @@ async fn resolve(core: &Core, name: Option<&str>, kind: Kind) -> R<Installed> {
                 .cloned()
         }
         None => {
-            let running = core.engines.running().await.map(|r| r.id);
+            let running = core.engines.running().await.first().map(|r| r.id.clone());
             all.iter().find(|m| Some(&m.id) == running.as_ref()).or(all.first()).cloned()
         }
     };
@@ -118,6 +121,7 @@ async fn resolve(core: &Core, name: Option<&str>, kind: Kind) -> R<Installed> {
             Kind::Transcribe => "speech-to-text",
             Kind::Speak => "text-to-speech",
             Kind::Image => "image",
+            Kind::Video => "video",
         };
         match name {
             Some(n) => ApiError(StatusCode::NOT_FOUND, format!("no {what} model called {n} is installed")),
@@ -139,7 +143,7 @@ async fn chat(State(core): State<Arc<Core>>, body: Bytes) -> R<Response> {
     let v: Value = serde_json::from_slice(&body)?;
     let m = resolve(&core, v["model"].as_str(), Kind::Chat).await?;
     let port = core.engines.ensure_chat(&m).await?;
-    core.engines.touch_chat().await;
+    core.engines.touch_chat(&m.id).await;
     let resp = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
         .header(header::CONTENT_TYPE, "application/json")
@@ -278,6 +282,55 @@ async fn image(State(core): State<Arc<Core>>, Json(req): Json<ImageReq>) -> R<Js
     Ok(Json(json!({ "created": created, "data": [{ "b64_json": b64, "path": out }] })))
 }
 
+#[derive(Deserialize)]
+struct VideoReq {
+    prompt: String,
+    model: Option<String>,
+    size: Option<String>,
+    seconds: Option<f64>,
+    steps: Option<u32>,
+    seed: Option<i64>,
+    negative_prompt: Option<String>,
+}
+
+/// Text to video with a Wan model. Not part of the OpenAI API; it mirrors the images endpoint and
+/// returns the clip's path (WebM) and its base64.
+async fn video(State(core): State<Arc<Core>>, Json(req): Json<VideoReq>) -> R<Json<Value>> {
+    if req.prompt.trim().is_empty() {
+        return Err(anyhow!("prompt is empty").into());
+    }
+    let m = resolve(&core, req.model.as_deref(), Kind::Video).await?;
+    let (Some(t5), Some(vae)) = (m.text_encoder.clone(), m.vae.clone()) else {
+        return Err(anyhow!("{} needs its umt5 text encoder and VAE files in its folder", m.name).into());
+    };
+    let s = settings(&core).await;
+    let (w, h) = req
+        .size
+        .as_deref()
+        .and_then(|sz| sz.split_once('x'))
+        .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
+        .unwrap_or((480, 272));
+    let (w, h) = (w.clamp(256, 832) / 16 * 16, h.clamp(256, 832) / 16 * 16);
+    // Wan makes 4n+1 frames at 16 fps
+    let fps = 16.0;
+    let frames = (((req.seconds.unwrap_or(2.0).clamp(1.0, 5.0) * fps) as u32) / 4 * 4 + 1).max(5);
+    let steps = req.steps.unwrap_or(15).clamp(4, 50);
+    let out = out_path("webm");
+    let mut cmd = Command::new(engine_bin(Engine::SdCli)?);
+    cmd.args(["-M", "vid_gen"]).arg("--diffusion-model").arg(&m.weights).arg("--t5xxl").arg(&t5).arg("--vae").arg(&vae)
+        .arg("-p").arg(&req.prompt).arg("-o").arg(&out)
+        .args(["-W", &w.to_string(), "-H", &h.to_string(), "--video-frames", &frames.to_string(), "--fps", "16"])
+        .args(["--steps", &steps.to_string(), "--cfg-scale", "6.0", "--sampling-method", "euler", "--flow-shift", "3.0"])
+        .args(["--vae-tiling", "-t", &s.effective_threads().to_string(), "-s", &req.seed.unwrap_or(-1).to_string()]);
+    if let Some(n) = req.negative_prompt.as_deref().filter(|n| !n.is_empty()) {
+        cmd.arg("-n").arg(n);
+    }
+    core.engines.run_job(&m, "video", cmd).await?;
+    let bytes = std::fs::read(&out)?;
+    let created = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    Ok(Json(json!({ "created": created, "data": [{ "b64_webm": base64::engine::general_purpose::STANDARD.encode(bytes), "path": out, "frames": frames, "size": format!("{w}x{h}") }] })))
+}
+
 /// How well a model fits: "great", "ok" (inside the budget), "over_budget" (the Mac could, the budget
 /// says no) or "too_big" (more than this Mac has).
 fn fit(need: f64, s: &Settings) -> &'static str {
@@ -306,6 +359,7 @@ async fn status(State(core): State<Arc<Core>>) -> Json<Value> {
         },
         "settings": s,
         "running": core.engines.running().await,
+        "max_loaded": s.effective_max_loaded(),
         "job": core.engines.current_job(),
         "used_gb": core.engines.used_gb().await,
         "events": core.engines.events(),
@@ -324,10 +378,30 @@ async fn library_list(State(core): State<Arc<Core>>) -> Json<Value> {
             let mut v = serde_json::to_value(&m).unwrap_or_default();
             v["need_gb"] = json!(need);
             v["fit"] = json!(fit(need, &s));
+            v["attribution"] = match catalog::get(&m.id) {
+                Some(c) => json!(catalog::attribution(&c)),
+                None => imported_source(&m.dir),
+            };
             v
         })
         .collect();
     Json(json!(list))
+}
+
+/// For a model added from a link: the Hugging Face repo (or site) it was downloaded from.
+fn imported_source(dir: &std::path::Path) -> Value {
+    let Some(url) = std::fs::read(dir.join("source.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v["urls"][0].as_str().map(str::to_string))
+    else {
+        return Value::Null;
+    };
+    let repo = url
+        .strip_prefix("https://huggingface.co/")
+        .map(|r| r.split('/').take(2).collect::<Vec<_>>().join("/"))
+        .unwrap_or_else(|| url.split('/').nth(2).unwrap_or("").to_string());
+    json!({ "license": "See the model page", "license_url": url, "origin": repo, "download_repo": repo, "imported_from": url })
 }
 
 async fn catalog_list(State(core): State<Arc<Core>>) -> Json<Value> {
@@ -340,6 +414,7 @@ async fn catalog_list(State(core): State<Arc<Core>>) -> Json<Value> {
             let need = match m.kind {
                 Kind::Chat => size + s.context_size as f64 * 7.5e-5 * (size / 5.0).clamp(0.2, 3.0) + 0.4,
                 Kind::Image => size * 1.3 + 1.2,
+                Kind::Video => size * 1.2 + 1.5,
                 Kind::Speak => size + 0.6,
                 Kind::Transcribe => size * 1.5 + 0.3,
             };
@@ -348,6 +423,7 @@ async fn catalog_list(State(core): State<Arc<Core>>) -> Json<Value> {
             v["need_gb"] = json!(need);
             v["fit"] = json!(fit(need, &s));
             v["installed"] = json!(installed.iter().any(|i| i == m.id));
+            v["attribution"] = json!(catalog::attribution(&m));
             v
         })
         .collect();
@@ -365,14 +441,83 @@ async fn launch(State(core): State<Arc<Core>>, Json(req): Json<IdReq>) -> R<Json
     Ok(Json(json!({ "id": m.id, "name": m.name, "port": port, "url": format!("http://127.0.0.1:{port}/") })))
 }
 
-async fn stop(State(core): State<Arc<Core>>) -> Json<Value> {
-    core.engines.stop_chat("you stopped it").await;
+#[derive(Deserialize, Default)]
+struct StopReq {
+    id: Option<String>,
+}
+
+/// Unloads one chat model (`{"id": ...}`), or all of them.
+async fn stop(State(core): State<Arc<Core>>, body: Option<Json<StopReq>>) -> Json<Value> {
+    match body.and_then(|Json(b)| b.id) {
+        Some(id) => core.engines.stop_model(&id, "you unloaded it").await,
+        None => core.engines.stop_chat("you unloaded it").await,
+    }
     Json(json!({ "ok": true }))
 }
 
 async fn download_start(State(core): State<Arc<Core>>, Json(req): Json<IdReq>) -> R<Json<Value>> {
     core.downloads.start(&req.id, core.settings.clone())?;
     Ok(Json(json!({ "ok": true })))
+}
+
+fn kind_from(k: &str) -> anyhow::Result<Kind> {
+    Ok(match k {
+        "chat" => Kind::Chat,
+        "transcribe" | "speak" | "voice" => Kind::Transcribe,
+        "image" => Kind::Image,
+        "video" => Kind::Video,
+        _ => anyhow::bail!("kind must be chat, voice, image or video"),
+    })
+}
+
+#[derive(Deserialize)]
+struct ImportUrlReq {
+    name: String,
+    kind: String,
+    urls: Vec<String>,
+}
+
+/// Downloads a model from links into ~/Models/<Kind>/<name>/.
+async fn import_url(State(core): State<Arc<Core>>, Json(req): Json<ImportUrlReq>) -> R<Json<Value>> {
+    let s = settings(&core).await;
+    let id = download::folder_name(&req.name);
+    let dir = s.kind_dir(kind_from(&req.kind)?).join(&id);
+    core.downloads.start_urls(&id, dir.clone(), req.urls.clone())?;
+    // remember where it came from, so the card can credit its source
+    let _ = std::fs::write(dir.join("source.json"), serde_json::to_vec_pretty(&json!({ "urls": req.urls }))?);
+    core.engines.note(format!("Downloading {id}"));
+    Ok(Json(json!({ "ok": true, "id": id })))
+}
+
+#[derive(Deserialize)]
+struct ImportFileReq {
+    name: String,
+    kind: String,
+    paths: Vec<String>,
+}
+
+/// Moves model files that are already on this Mac into ~/Models/<Kind>/<name>/, so they're kept in
+/// one place without a second copy eating disk. Across disks it copies instead.
+async fn import_file(State(core): State<Arc<Core>>, Json(req): Json<ImportFileReq>) -> R<Json<Value>> {
+    let s = settings(&core).await;
+    let id = download::folder_name(&req.name);
+    let dir = s.kind_dir(kind_from(&req.kind)?).join(&id);
+    std::fs::create_dir_all(&dir)?;
+    let mut moved = 0;
+    for p in &req.paths {
+        let src = PathBuf::from(p);
+        let n = src.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if !src.is_file() || !(n.ends_with(".gguf") || n.ends_with(".bin") || n.ends_with(".safetensors")) {
+            return Err(anyhow!("{p} isn't a .gguf, .bin or .safetensors file").into());
+        }
+        let dest = dir.join(src.file_name().unwrap());
+        if std::fs::rename(&src, &dest).is_err() {
+            std::fs::copy(&src, &dest)?;
+        }
+        moved += 1;
+    }
+    core.engines.note(format!("Added {id} ({moved} file{})", if moved == 1 { "" } else { "s" }));
+    Ok(Json(json!({ "ok": true, "id": id })))
 }
 
 async fn download_cancel(State(core): State<Arc<Core>>, Json(req): Json<IdReq>) -> Json<Value> {
@@ -383,9 +528,7 @@ async fn download_cancel(State(core): State<Arc<Core>>, Json(req): Json<IdReq>) 
 async fn delete(State(core): State<Arc<Core>>, Json(req): Json<IdReq>) -> R<Json<Value>> {
     let s = settings(&core).await;
     let m = library::find(&s, &req.id).ok_or_else(|| anyhow!("{} isn't installed", req.id))?;
-    if core.engines.running().await.is_some_and(|r| r.id == m.id) {
-        core.engines.stop_chat("it's being deleted").await;
-    }
+    core.engines.stop_model(&m.id, "it's being deleted").await;
     // only ever a model's own folder inside the models folder
     let root = s.models_dir.canonicalize()?;
     let dir = m.dir.canonicalize()?;

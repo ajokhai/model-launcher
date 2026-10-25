@@ -47,7 +47,7 @@ impl Engine {
             Kind::Chat => Engine::LlamaServer,
             Kind::Speak => Engine::LlamaTts,
             Kind::Transcribe => Engine::WhisperCli,
-            Kind::Image => Engine::SdCli,
+            Kind::Image | Kind::Video => Engine::SdCli,
         }
     }
 
@@ -75,6 +75,8 @@ pub fn estimate_gb(m: &Installed, s: &Settings) -> f64 {
             m.size_gb + kv + 0.4
         }
         Kind::Image => m.size_gb * 1.3 + 1.2,
+        // frames are decoded in tiles, so most of the cost is the weights plus the text encoder
+        Kind::Video => m.size_gb * 1.2 + 1.5,
         Kind::Speak => m.size_gb + 0.6,
         Kind::Transcribe => m.size_gb * 1.5 + 0.3,
     }
@@ -101,6 +103,8 @@ struct ChatServer {
     child: Child,
     port: u16,
     pid: u32,
+    /// What the model was expected to need when it was loaded, for fitting the next one in.
+    need_gb: f64,
     last_used: Instant,
     ready: bool,
 }
@@ -114,7 +118,11 @@ pub struct Job {
 
 pub struct Engines {
     settings: Arc<RwLock<Settings>>,
-    chat: Mutex<Option<ChatServer>>,
+    /// Loaded chat models by id. Several can be loaded at once while they fit the budget and the
+    /// "models at once" limit; past that, the least recently used one is unloaded.
+    chat: Mutex<Vec<ChatServer>>,
+    /// Loads happen one at a time, so two can't both decide the same memory is free.
+    loading: Mutex<()>,
     /// Voice and image jobs run one at a time.
     jobs: Semaphore,
     job: StdMutex<Option<Job>>,
@@ -127,7 +135,8 @@ impl Engines {
         let _ = std::fs::create_dir_all(logs_dir());
         Arc::new(Engines {
             settings,
-            chat: Mutex::new(None),
+            chat: Mutex::new(Vec::new()),
+            loading: Mutex::new(()),
             jobs: Semaphore::new(1),
             job: StdMutex::new(None),
             events: StdMutex::new(VecDeque::new()),
@@ -146,18 +155,24 @@ impl Engines {
         self.events.lock().unwrap().iter().cloned().collect()
     }
 
-    pub async fn running(&self) -> Option<Running> {
+    /// Loaded chat models, most recently used first.
+    pub async fn running(&self) -> Vec<Running> {
         let c = self.chat.lock().await;
-        c.as_ref().map(|c| Running {
-            id: c.model.id.clone(),
-            name: c.model.name.clone(),
-            port: c.port,
-            pid: c.pid,
-            memory_gb: system::process_memory_gb(c.pid).unwrap_or(0.0),
-            idle_secs: c.last_used.elapsed().as_secs(),
-            ready: c.ready,
-            vision: c.model.projector.is_some(),
-        })
+        let mut v: Vec<Running> = c
+            .iter()
+            .map(|c| Running {
+                id: c.model.id.clone(),
+                name: c.model.name.clone(),
+                port: c.port,
+                pid: c.pid,
+                memory_gb: system::process_memory_gb(c.pid).unwrap_or(0.0),
+                idle_secs: c.last_used.elapsed().as_secs(),
+                ready: c.ready,
+                vision: c.model.projector.is_some(),
+            })
+            .collect();
+        v.sort_by_key(|r| r.idle_secs);
+        v
     }
 
     pub fn current_job(&self) -> Option<Job> {
@@ -170,45 +185,63 @@ impl Engines {
 
     /// Memory the running models use right now, in GB.
     pub async fn used_gb(&self) -> f64 {
-        let chat = self.running().await.map(|r| r.memory_gb).unwrap_or(0.0);
+        let chat: f64 = self.running().await.iter().map(|r| r.memory_gb).sum();
         chat + self.current_job().map(|j| j.memory_gb).unwrap_or(0.0)
     }
 
-    /// Makes sure `m` is the loaded chat model and returns its port. Swaps out whatever was loaded.
+    fn write_pids(c: &[ChatServer]) {
+        let pids: Vec<String> = c.iter().map(|c| c.pid.to_string()).collect();
+        if pids.is_empty() {
+            let _ = std::fs::remove_file(pid_file());
+        } else {
+            let _ = std::fs::write(pid_file(), pids.join("\n"));
+        }
+    }
+
+    /// Makes sure `m` is loaded and returns its port. Other loaded models stay loaded while there's
+    /// room; when there isn't, the least recently used are unloaded first.
     pub async fn ensure_chat(&self, m: &Installed) -> Result<u16> {
         if m.kind != Kind::Chat {
             bail!("{} isn't a chat model", m.name);
         }
-        let mut guard = self.chat.lock().await;
-        if let Some(c) = guard.as_mut() {
-            if c.model.id == m.id && c.child.try_wait().ok().flatten().is_none() {
-                c.last_used = Instant::now();
-                let port = c.port;
-                let ready = c.ready;
-                drop(guard);
-                if !ready {
-                    self.wait_ready(port).await?;
-                }
-                return Ok(port);
+        if let Some((port, ready)) = self.touch(&m.id).await {
+            if !ready {
+                self.wait_ready(port).await?;
             }
+            return Ok(port);
         }
-        if let Some(old) = guard.take() {
-            self.note(format!("Swapped out {} to load {}", old.model.name, m.name));
-            stop_child(old.child).await;
+        let _one_load = self.loading.lock().await;
+        if let Some((port, _)) = self.touch(&m.id).await {
+            return Ok(port);
         }
 
         let s = self.settings.read().await.clone();
         let need = estimate_gb(m, &s);
         if need > s.memory_budget_gb {
             bail!(
-                "{} needs about {:.1} GB, more than your {:.0} GB memory budget. Raise the budget in Settings or pick a smaller model.",
+                "{} needs about {:.1} GB, more than your {:.0} GB RAM budget. Raise the budget in Settings or pick a smaller model.",
                 m.name, need, s.memory_budget_gb
             );
+        }
+        // make room: unload least recently used models until this one fits the budget and the limit
+        loop {
+            let mut c = self.chat.lock().await;
+            let used: f64 = c.iter().map(|c| c.need_gb).sum();
+            let fits = used + need <= s.memory_budget_gb && (c.len() as u32) < s.effective_max_loaded();
+            if fits || c.is_empty() {
+                break;
+            }
+            let lru = (0..c.len()).max_by_key(|&i| c[i].last_used.elapsed()).unwrap();
+            let old = c.remove(lru);
+            Self::write_pids(&c);
+            drop(c);
+            self.note(format!("Unloaded {} to make room for {}", old.model.name, m.name));
+            stop_child(old.child).await;
         }
         let free = system::available_memory_gb() + self.current_job().map(|j| j.memory_gb).unwrap_or(0.0);
         if need > free + 1.0 {
             bail!(
-                "{} needs about {:.1} GB but only {:.1} GB is free right now. Close some apps and try again.",
+                "{} needs about {:.1} GB but only {:.1} GB is free right now. Close some apps or unload a model, then try again.",
                 m.name, need, free
             );
         }
@@ -230,25 +263,37 @@ impl Engines {
             // flash attention plus an 8-bit KV cache halves the memory a long chat takes
             .args(["-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0"])
             .args(["--jinja", "--parallel", "1"]);
-        let child = spawn_logged(cmd, "chat")?;
+        let child = spawn_logged(cmd, &format!("chat-{}", m.id))?;
         let pid = child.id().unwrap_or(0);
-        let _ = std::fs::write(pid_file(), pid.to_string());
         if s.low_priority {
             system::make_low_priority(pid);
         }
         self.note(format!("Loading {} ({:.1} GB expected)", m.name, need));
-        *guard = Some(ChatServer { model: m.clone(), child, port, pid, last_used: Instant::now(), ready: false });
-        drop(guard);
-
+        {
+            let mut c = self.chat.lock().await;
+            c.push(ChatServer { model: m.clone(), child, port, pid, need_gb: need, last_used: Instant::now(), ready: false });
+            Self::write_pids(&c);
+        }
         if let Err(e) = self.wait_ready(port).await {
-            self.stop_chat("it didn't start").await;
+            self.stop_model(&m.id, "it didn't start").await;
             return Err(e);
         }
-        if let Some(c) = self.chat.lock().await.as_mut() {
+        if let Some(c) = self.chat.lock().await.iter_mut().find(|c| c.port == port) {
             c.ready = true;
         }
         self.note(format!("{} is ready", m.name));
         Ok(port)
+    }
+
+    /// Marks a loaded model as just used; returns its port and whether it's ready.
+    async fn touch(&self, id: &str) -> Option<(u16, bool)> {
+        let mut c = self.chat.lock().await;
+        let cs = c.iter_mut().find(|c| c.model.id == id)?;
+        if cs.child.try_wait().ok().flatten().is_some() {
+            return None;
+        }
+        cs.last_used = Instant::now();
+        Some((cs.port, cs.ready))
     }
 
     async fn wait_ready(&self, port: u16) -> Result<()> {
@@ -261,13 +306,14 @@ impl Engines {
             }
             {
                 let mut c = self.chat.lock().await;
-                match c.as_mut() {
-                    Some(c) if c.port == port => {
+                match c.iter_mut().find(|c| c.port == port) {
+                    Some(c) => {
                         if let Ok(Some(status)) = c.child.try_wait() {
-                            bail!("the model server stopped while loading ({status}); see {}", logs_dir().join("chat.log").display());
+                            bail!("the model server stopped while loading ({status}); see {}",
+                                logs_dir().join(format!("chat-{}.log", c.model.id)).display());
                         }
                     }
-                    _ => bail!("the model was unloaded while starting"),
+                    None => bail!("the model was unloaded while starting"),
                 }
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -275,32 +321,56 @@ impl Engines {
         bail!("the model took more than two minutes to load")
     }
 
-    pub async fn touch_chat(&self) {
-        if let Some(c) = self.chat.lock().await.as_mut() {
-            c.last_used = Instant::now();
+    pub async fn touch_chat(&self, id: &str) {
+        self.touch(id).await;
+    }
+
+    pub async fn stop_model(&self, id: &str, why: &str) {
+        let removed = {
+            let mut c = self.chat.lock().await;
+            let i = c.iter().position(|c| c.model.id == id);
+            let r = i.map(|i| c.remove(i));
+            Self::write_pids(&c);
+            r
+        };
+        if let Some(cs) = removed {
+            self.note(format!("Unloaded {}: {why}", cs.model.name));
+            stop_child(cs.child).await;
         }
     }
 
+    /// Unloads every chat model.
     pub async fn stop_chat(&self, why: &str) {
-        if let Some(c) = self.chat.lock().await.take() {
-            let _ = std::fs::remove_file(pid_file());
-            self.note(format!("Unloaded {}: {why}", c.model.name));
-            stop_child(c.child).await;
+        let all: Vec<ChatServer> = {
+            let mut c = self.chat.lock().await;
+            let v = std::mem::take(&mut *c);
+            Self::write_pids(&c);
+            v
+        };
+        for cs in all {
+            self.note(format!("Unloaded {}: {why}", cs.model.name));
+            stop_child(cs.child).await;
         }
     }
 
-    /// Runs a voice or image job to completion, inside the memory budget. A loaded chat model that
-    /// would push the total over budget is unloaded first (it reloads on the next chat).
+    /// Runs a voice or image job to completion, inside the RAM budget. If the job plus the loaded
+    /// chat models would go over, the least recently used chat models are unloaded first.
     pub async fn run_job(&self, m: &Installed, label: &str, mut cmd: Command) -> Result<()> {
         let _permit = self.jobs.acquire().await?;
         let s = self.settings.read().await.clone();
         let need = estimate_gb(m, &s);
         if need > s.memory_budget_gb {
-            bail!("{} needs about {:.1} GB, more than your {:.0} GB memory budget.", m.name, need, s.memory_budget_gb);
+            bail!("{} needs about {:.1} GB, more than your {:.0} GB RAM budget.", m.name, need, s.memory_budget_gb);
         }
-        let chat_gb = self.running().await.map(|r| r.memory_gb).unwrap_or(0.0);
-        if chat_gb + need > s.memory_budget_gb {
-            self.stop_chat(&format!("made room for {}", m.name)).await;
+        loop {
+            let running = self.running().await;
+            let chat_gb: f64 = running.iter().map(|r| r.memory_gb).sum();
+            match running.last() {
+                Some(lru) if chat_gb + need > s.memory_budget_gb => {
+                    self.stop_model(&lru.id, &format!("made room for {}", m.name)).await
+                }
+                _ => break,
+            }
         }
         cmd.stdin(Stdio::null());
         let mut child = spawn_logged(cmd, label)?;
@@ -318,7 +388,9 @@ impl Engines {
         Ok(())
     }
 
-    /// Every two seconds: stop whatever is over the memory budget, and unload an idle chat model.
+    /// Every two seconds: keep the total under the RAM budget (stopping the job if it's the one
+    /// that grew, else the least recently used chat model), unload idle chat models, and forget
+    /// servers that died on their own.
     pub async fn watchdog(self: Arc<Self>) {
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -326,34 +398,45 @@ impl Engines {
             let job = self.current_job();
             let job_gb = job.as_ref().map(|j| j.memory_gb).unwrap_or(0.0);
             let running = self.running().await;
-            let chat_gb = running.as_ref().map(|r| r.memory_gb).unwrap_or(0.0);
+            let chat_gb: f64 = running.iter().map(|r| r.memory_gb).sum();
             // a little grace, so a brief spike while loading doesn't kill a model that fits
             let limit = s.memory_budget_gb * 1.1;
             if chat_gb + job_gb > limit {
-                if job_gb > chat_gb {
-                    if let Some(j) = job {
+                let biggest_chat = running.iter().map(|r| r.memory_gb).fold(0.0, f64::max);
+                match (job, running.last()) {
+                    (Some(j), _) if job_gb > biggest_chat => {
                         unsafe { libc::kill(j.pid as i32, libc::SIGTERM) };
-                        self.note(format!("Stopped {}: it used {:.1} GB, over your {:.0} GB budget", j.label, job_gb, s.memory_budget_gb));
+                        self.note(format!("Stopped {}: it used {:.1} GB, over your {:.0} GB RAM budget", j.label, job_gb, s.memory_budget_gb));
                     }
-                } else {
-                    self.stop_chat(&format!("it used {:.1} GB, over your {:.0} GB budget", chat_gb, s.memory_budget_gb)).await;
+                    (_, Some(lru)) => {
+                        let why = format!("models used {:.1} GB, over your {:.0} GB RAM budget", chat_gb + job_gb, s.memory_budget_gb);
+                        self.stop_model(&lru.id, &why).await;
+                    }
+                    _ => {}
                 }
                 continue;
             }
-            if let Some(r) = running {
-                if s.idle_unload_minutes > 0 && r.ready && r.idle_secs >= s.idle_unload_minutes as u64 * 60 {
-                    self.stop_chat(&format!("idle for {} minutes", s.idle_unload_minutes)).await;
+            if s.idle_unload_minutes > 0 {
+                for r in running.iter().filter(|r| r.ready && r.idle_secs >= s.idle_unload_minutes as u64 * 60) {
+                    self.stop_model(&r.id, &format!("idle for {} minutes", s.idle_unload_minutes)).await;
                 }
             }
-            // a server that died on its own
-            let mut c = self.chat.lock().await;
-            if let Some(cs) = c.as_mut() {
-                if let Ok(Some(st)) = cs.child.try_wait() {
-                    let name = cs.model.name.clone();
-                    *c = None;
-                    drop(c);
-                    self.note(format!("{name} stopped on its own ({st})"));
+            let mut dead = Vec::new();
+            {
+                let mut c = self.chat.lock().await;
+                c.retain_mut(|cs| match cs.child.try_wait() {
+                    Ok(Some(st)) => {
+                        dead.push(format!("{} stopped on its own ({st})", cs.model.name));
+                        false
+                    }
+                    _ => true,
+                });
+                if !dead.is_empty() {
+                    Self::write_pids(&c);
                 }
+            }
+            for d in dead {
+                self.note(d);
             }
         }
     }
@@ -383,18 +466,21 @@ fn pid_file() -> PathBuf {
     support_dir().join("chat.pid")
 }
 
-/// Stops a model server left behind by a run that crashed or was killed, so its memory comes back.
-pub fn reap_orphan() -> Option<u32> {
-    let pid: i32 = std::fs::read_to_string(pid_file()).ok()?.trim().parse().ok()?;
+/// Stops model servers left behind by a run that crashed or was killed, so their memory comes back.
+pub fn reap_orphan() -> Vec<u32> {
+    let pids: Vec<i32> = std::fs::read_to_string(pid_file()).unwrap_or_default().lines().filter_map(|l| l.trim().parse().ok()).collect();
     let _ = std::fs::remove_file(pid_file());
-    let mut buf = [0u8; 4096];
-    let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut libc::c_void, buf.len() as u32) };
-    let path = String::from_utf8_lossy(&buf[..n.max(0) as usize]).to_string();
-    if n > 0 && path.ends_with("/llama-server") {
-        unsafe { libc::kill(pid, libc::SIGTERM) };
-        return Some(pid as u32);
+    let mut stopped = Vec::new();
+    for pid in pids {
+        let mut buf = [0u8; 4096];
+        let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut libc::c_void, buf.len() as u32) };
+        let path = String::from_utf8_lossy(&buf[..n.max(0) as usize]).to_string();
+        if n > 0 && path.ends_with("/llama-server") {
+            unsafe { libc::kill(pid, libc::SIGTERM) };
+            stopped.push(pid as u32);
+        }
     }
-    None
+    stopped
 }
 
 fn spawn_logged(mut cmd: Command, label: &str) -> Result<Child> {
