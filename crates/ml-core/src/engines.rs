@@ -539,15 +539,25 @@ pub fn reap_orphan() -> Vec<u32> {
     let _ = std::fs::remove_file(pid_file());
     let mut stopped = Vec::new();
     for pid in pids {
-        let mut buf = [0u8; 4096];
-        let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut libc::c_void, buf.len() as u32) };
-        let path = String::from_utf8_lossy(&buf[..n.max(0) as usize]).to_string();
-        if n > 0 && path.ends_with("/llama-server") {
+        if exe_path(pid).is_some_and(|p| p.ends_with("/llama-server")) {
             unsafe { libc::kill(pid, libc::SIGTERM) };
             stopped.push(pid as u32);
         }
     }
     stopped
+}
+
+/// The program a process is running, to make sure a saved pid is still a model server.
+#[cfg(target_os = "macos")]
+fn exe_path(pid: i32) -> Option<String> {
+    let mut buf = [0u8; 4096];
+    let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr() as *mut libc::c_void, buf.len() as u32) };
+    (n > 0).then(|| String::from_utf8_lossy(&buf[..n as usize]).to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn exe_path(pid: i32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok().map(|p| p.to_string_lossy().to_string())
 }
 
 /// model-launcher-mcp, which ships next to the app's own binary (or sits in target/ during development).
