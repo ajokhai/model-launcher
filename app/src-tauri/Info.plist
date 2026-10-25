@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Model Launcher saves benchmark reports and your own benchmarks in Documents › Computer Use Benchmarks.</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>Model Launcher can keep your models on an external drive and read them from there.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Model Launcher can add model files you choose from Downloads.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Model Launcher can add model files you choose from the Desktop.</string>
+</dict>
+</plist>

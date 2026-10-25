@@ -12,7 +12,11 @@ npx tauri build --bundles app --config app/src-tauri/tauri.conf.json
 APP="target/release/bundle/macos/Model Launcher.app"
 cp target/release/model-launcher-mcp "$APP/Contents/MacOS/model-launcher-mcp"
 xattr -cr "$APP"
-codesign --force --deep -s - "$APP"
+# Sign with the local "Computer Use Local Signing" certificate when this Mac has it (Computer Use's
+# packaging makes it): the identity stays the same across builds, so macOS keeps file-access
+# permissions after updates instead of asking again. Otherwise sign ad hoc.
+SIGN=$(security find-certificate -c "Computer Use Local Signing" -Z 2>/dev/null | awk '/SHA-1/ {print $NF; exit}')
+codesign --force --deep -s "${SIGN:--}" "$APP"
 
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 mkdir -p dist
