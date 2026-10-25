@@ -93,7 +93,7 @@ h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; c
 .live.loading { background: var(--orange-1); box-shadow: 0 0 0 4px rgba(255,189,97,.25); animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .4; } }
 
-.studio, .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.studio, .settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
 .studio .wide { grid-column: 1 / -1; }
 .hint { color: var(--muted); font-size: 13px; }
 .row { display: flex; gap: 8px; align-items: center; }
@@ -203,7 +203,7 @@ a { color: var(--text); text-decoration: underline; text-decoration-color: var(-
 .live.loading { background: #d97706; box-shadow: 0 0 0 4px rgba(217,119,6,.2); }
 
 /* connect */
-.connect { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.connect { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
 .connect .card { gap: 14px; }
 .section-head .hint { margin-top: 2px; }
 .copy code { font-size: 12.5px; padding: 9px 12px; }
@@ -221,7 +221,7 @@ a { color: var(--text); text-decoration: underline; text-decoration-color: var(-
 .client .icon { width: 30px; height: 30px; font-size: 12px; border-radius: 8px; }
 .client-name { flex: 1; display: flex; flex-direction: column; line-height: 1.25; }
 .client-name b { font-size: 13.5px; } .client-name .muted { font-size: 11.5px; }
-.tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; font-size: 12px; background: var(--chip); border-radius: 14px; padding: 12px 14px; }
+.tools { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 14px; font-size: 12px; background: var(--chip); border-radius: 14px; padding: 12px 14px; }
 .tools div { display: flex; flex-direction: column; gap: 1px; } .tools code { background: none; padding: 0; font-size: 12px; } .tools span { color: var(--muted); }
 .manual summary { cursor: pointer; font-weight: 600; font-size: 13px; }
 .manual pre { margin: 8px 0; font-size: 11.5px; }
@@ -253,7 +253,8 @@ a { color: var(--text); text-decoration: underline; text-decoration-color: var(-
 .bench-table td { padding: 8px; border-top: 1px solid var(--line); }
 #bench-run .card { margin-bottom: 14px; }
 .support { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-.bench-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.bench-pick { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
 .bench-task { padding: 12px 14px; border-radius: 10px; background: rgba(127,127,127,.08); display: grid; gap: 6px; }
 #task-modal textarea, #task-modal input { width: 100%; font: inherit; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: inherit; }
 #task-modal .modal-card { width: min(560px, calc(100vw - 32px)); gap: 14px; }
+.page .card { min-width: 0; }
