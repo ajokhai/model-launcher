@@ -28,6 +28,7 @@ use crate::engines::{estimate_gb, Engine};
 use crate::library::{self, Installed};
 use crate::settings::{outputs_dir, Settings};
 use crate::system;
+use crate::web;
 use crate::Core;
 
 pub struct ApiError(StatusCode, String);
@@ -87,6 +88,8 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/api/settings", post(update_settings))
         .route("/api/engines/install", post(install_engine))
         .route("/api/reveal", post(reveal))
+        .route("/api/web/search", post(web_search))
+        .route("/api/web/fetch", post(web_fetch))
         .layer(DefaultBodyLimit::max(200 << 20))
         .layer(middleware::from_fn(guard))
         .with_state(core)
@@ -545,7 +548,13 @@ fn bail_api(msg: &str) -> R<()> {
 }
 
 async fn update_settings(State(core): State<Arc<Core>>, Json(patch): Json<Value>) -> R<Json<Value>> {
+    let new = save_settings(&core, patch).await?;
+    Ok(Json(serde_json::to_value(new)?))
+}
+
+async fn save_settings(core: &Arc<Core>, patch: Value) -> anyhow::Result<Settings> {
     let mut s = core.settings.write().await;
+    let was_online = s.web_access;
     let mut v = serde_json::to_value(&*s)?;
     if let (Some(obj), Some(p)) = (v.as_object_mut(), patch.as_object()) {
         for (k, val) in p {
@@ -557,7 +566,39 @@ async fn update_settings(State(core): State<Arc<Core>>, Json(patch): Json<Value>
     let new: Settings = serde_json::from_value::<Settings>(v)?.clamped();
     new.save()?;
     *s = new.clone();
-    Ok(Json(serde_json::to_value(new)?))
+    drop(s);
+    if new.web_access != was_online {
+        // Tools are fixed when llama-server starts, so reload loaded models in the background.
+        let core = core.clone();
+        tokio::spawn(async move { core.engines.reload_chat().await });
+    }
+    Ok(new)
+}
+
+#[derive(Deserialize)]
+struct SearchReq {
+    query: String,
+    max_results: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct FetchReq {
+    url: String,
+}
+
+async fn web_search(State(core): State<Arc<Core>>, Json(req): Json<SearchReq>) -> R<Json<Value>> {
+    if !settings(&core).await.web_access {
+        bail_api("Internet access is off in Settings")?;
+    }
+    let results = web::search(&req.query, req.max_results.unwrap_or(6).clamp(1, 10)).await?;
+    Ok(Json(json!({ "query": req.query, "results": results })))
+}
+
+async fn web_fetch(State(core): State<Arc<Core>>, Json(req): Json<FetchReq>) -> R<Json<Value>> {
+    if !settings(&core).await.web_access {
+        bail_api("Internet access is off in Settings")?;
+    }
+    Ok(Json(web::fetch(&req.url).await?))
 }
 
 #[derive(Deserialize)]

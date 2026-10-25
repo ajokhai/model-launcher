@@ -2,6 +2,9 @@
 //! the models running in Model Launcher: chat, transcribe, speak and generate_image, plus listing,
 //! loading and unloading models. It talks to the app's local API and opens the app if it isn't
 //! running. Its only dependency is serde_json; HTTP to localhost is written by hand.
+//!
+//! With `--web` it is instead the internet access Model Launcher gives its own chat models: llama-server
+//! starts it with `search` and `open_page` tools, which the app serves when Internet access is on.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
@@ -113,6 +116,45 @@ fn tools() -> Value {
         { "name": "unload_model", "description": "Unload a chat model (or all of them, with no model given) and free its memory.",
           "inputSchema": { "type": "object", "properties": { "model": { "type": "string" } } } }
     ])
+}
+
+fn web_tools() -> Value {
+    json!([
+        { "name": "search", "description": "Search the web. Returns the top results with title, link and a snippet. Use it for anything recent or that you aren't sure of, then open_page on the best links.",
+          "inputSchema": { "type": "object", "properties": {
+              "query": { "type": "string" },
+              "max_results": { "type": "integer", "description": "1 to 10, default 6" } }, "required": ["query"] } },
+        { "name": "open_page", "description": "Read a web page as plain text (the first few thousand characters).",
+          "inputSchema": { "type": "object", "properties": {
+              "url": { "type": "string", "description": "An http or https link" } }, "required": ["url"] } }
+    ])
+}
+
+fn call_web(name: &str, a: &Value) -> Result<String, String> {
+    let t = Duration::from_secs(30);
+    match name {
+        "search" => {
+            let mut body = json!({ "query": a["query"].as_str().unwrap_or_default() });
+            if let Some(n) = a["max_results"].as_u64() {
+                body["max_results"] = json!(n);
+            }
+            let r = api("POST", "/api/web/search", Some(&body), t)?;
+            let lines: Vec<String> = r["results"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, x)| format!("{}. {}\n{}\n{}", i + 1, x["title"].as_str().unwrap_or(""), x["url"].as_str().unwrap_or(""), x["snippet"].as_str().unwrap_or("")))
+                .collect();
+            Ok(if lines.is_empty() { "No results.".into() } else { lines.join("\n\n") })
+        }
+        "open_page" => {
+            let r = api("POST", "/api/web/fetch", Some(&json!({ "url": a["url"].as_str().unwrap_or_default() })), t)?;
+            let more = if r["truncated"].as_bool().unwrap_or(false) { "\n[page cut short]" } else { "" };
+            Ok(format!("{}\n{}\n\n{}{more}", r["title"].as_str().unwrap_or(""), r["url"].as_str().unwrap_or(""), r["text"].as_str().unwrap_or("")))
+        }
+        _ => Err(format!("unknown tool {name}")),
+    }
 }
 
 fn call(name: &str, a: &Value) -> Result<String, String> {
@@ -240,10 +282,11 @@ fn call(name: &str, a: &Value) -> Result<String, String> {
 fn main() {
     if std::env::args().any(|a| a == "--help" || a == "-h") {
         println!(
-            "model-launcher-mcp {VERSION}\nMCP server (stdio) for Model Launcher. Add it to an MCP client as a stdio server whose command is this file's path.\nTools: list_models, chat, transcribe, speak, generate_image, generate_video, load_model, unload_model."
+            "model-launcher-mcp {VERSION}\nMCP server (stdio) for Model Launcher. Add it to an MCP client as a stdio server whose command is this file's path.\nTools: list_models, chat, transcribe, speak, generate_image, generate_video, load_model, unload_model.\n--web serves search and open_page instead (Model Launcher's internet access for its own models)."
         );
         return;
     }
+    let web = std::env::args().any(|a| a == "--web");
     let mut out = std::io::stdout();
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { break };
@@ -253,13 +296,14 @@ fn main() {
             "initialize" => Ok(json!({
                 "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "model-launcher", "version": VERSION },
-                "instructions": "Open-source models running locally on this Mac through Model Launcher. Call list_models first."
+                "serverInfo": { "name": if web { "model-launcher-web" } else { "model-launcher" }, "version": VERSION },
+                "instructions": if web { "Search the web and read pages." } else { "Open-source models running locally on this Mac through Model Launcher. Call list_models first." }
             })),
-            "tools/list" => Ok(json!({ "tools": tools() })),
+            "tools/list" => Ok(json!({ "tools": if web { web_tools() } else { tools() } })),
             "tools/call" => {
                 let p = &msg["params"];
-                Ok(match call(p["name"].as_str().unwrap_or(""), &p["arguments"]) {
+                let (name, args) = (p["name"].as_str().unwrap_or(""), &p["arguments"]);
+                Ok(match if web { call_web(name, args) } else { call(name, args) } {
                     Ok(text) => json!({ "content": [{ "type": "text", "text": text }] }),
                     Err(e) => json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
                 })

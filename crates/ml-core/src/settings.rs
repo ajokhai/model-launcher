@@ -28,6 +28,8 @@ pub struct Settings {
     /// Chat models that may be loaded at the same time; 0 picks by this Mac's RAM. They still
     /// have to fit the RAM budget together.
     pub max_loaded: u32,
+    /// Let chat models search the web and read pages. Off keeps them fully offline.
+    pub web_access: bool,
 }
 
 impl Default for Settings {
@@ -43,6 +45,7 @@ impl Default for Settings {
             low_priority: true,
             api_port: 11500,
             max_loaded: 0,
+            web_access: true,
         }
     }
 }

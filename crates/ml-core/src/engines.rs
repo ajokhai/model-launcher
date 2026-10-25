@@ -7,6 +7,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
+use serde_json::json;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -267,6 +268,16 @@ impl Engines {
             // llama.cpp keeps old prompts in RAM (up to 8 GB by default); cap it so a long session
             // can't grow a model past the budget. 512 MB still covers an agent's recent turns.
             .args(["--cache-ram", "512"]);
+        if s.web_access {
+            match web_tools() {
+                // Exposed to the model as web_search and web_open_page.
+                Some(mcp) => {
+                    let servers = json!({ "mcpServers": { "web": { "command": mcp, "args": ["--web"], "timeout_ms": 30000 } } });
+                    cmd.arg("--mcp-servers-json").arg(servers.to_string());
+                }
+                None => self.note("Internet access is on, but the web tool wasn't found next to the app"),
+            }
+        }
         let child = spawn_logged(cmd, &format!("chat-{}", m.id))?;
         let pid = child.id().unwrap_or(0);
         if s.low_priority {
@@ -340,6 +351,20 @@ impl Engines {
         if let Some(cs) = removed {
             self.note(format!("Unloaded {}: {why}", cs.model.name));
             stop_child(cs.child).await;
+        }
+    }
+
+    /// Unloads and loads again every chat model, e.g. after Internet access is switched.
+    pub async fn reload_chat(&self) {
+        let models: Vec<Installed> = self.chat.lock().await.iter().map(|c| c.model.clone()).collect();
+        if models.is_empty() {
+            return;
+        }
+        self.stop_chat("reloading for the new Internet access setting").await;
+        for m in models {
+            if let Err(e) = self.ensure_chat(&m).await {
+                self.note(format!("Couldn't reload {}: {e}", m.name));
+            }
         }
     }
 
@@ -485,6 +510,13 @@ pub fn reap_orphan() -> Vec<u32> {
         }
     }
     stopped
+}
+
+/// model-launcher-mcp, which ships next to the app's own binary (or sits in target/ during development).
+fn web_tools() -> Option<PathBuf> {
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let p = dir.join("model-launcher-mcp");
+    p.exists().then_some(p)
 }
 
 fn spawn_logged(mut cmd: Command, label: &str) -> Result<Child> {

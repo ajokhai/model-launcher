@@ -391,6 +391,7 @@ function renderSettings() {
     $('s-threads').value = s.threads;
     $('s-gpu').checked = s.use_gpu;
     $('s-low').checked = s.low_priority;
+    $('s-web').checked = s.web_access;
     settingsDrawn = true;
   }
   $('v-budget').textContent = `${$('s-budget').value} GB`;
@@ -415,14 +416,14 @@ function saveSettings() {
     try {
       await api('/api/settings', { body: {
         memory_budget_gb: +$('s-budget').value, context_size: +$('s-ctx').value, idle_unload_minutes: +$('s-idle').value, max_loaded: +$('s-max').value,
-        threads: +$('s-threads').value, use_gpu: $('s-gpu').checked, low_priority: $('s-low').checked } });
+        threads: +$('s-threads').value, use_gpu: $('s-gpu').checked, low_priority: $('s-low').checked, web_access: $('s-web').checked } });
       state.catalog = await api('/api/catalog');
       toast('Saved');
       refresh();
     } catch (e) { toast(e.message, true); }
   }, 350);
 }
-['s-budget', 's-ctx', 's-idle', 's-max', 's-threads', 's-gpu', 's-low'].forEach((id) => $(id).addEventListener('input', saveSettings));
+['s-budget', 's-ctx', 's-idle', 's-max', 's-threads', 's-gpu', 's-low', 's-web'].forEach((id) => $(id).addEventListener('input', saveSettings));
 
 refresh();
 setInterval(refresh, 2000);

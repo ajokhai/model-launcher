@@ -186,6 +186,8 @@
           <small class="note">Much faster. Turn off to keep the GPU free for games or video work.</small>
           <label class="toggle"><input type="checkbox" id="s-low"><span>Low priority</span></label>
           <small class="note">Models yield the CPU to whatever you're doing, so the Mac never feels stuck.</small>
+          <label class="toggle"><input type="checkbox" id="s-web"><span>Internet access</span></label>
+          <small class="note">Chat models can search the web and read pages when a question needs it. Turn off to keep them fully offline. Loaded models reload to apply it.</small>
         </div>
         <div class="card">
           <div class="card-title"><span class="dot violet"></span>Engines</div>
@@ -210,6 +212,8 @@
           <p>Engines are installed for you the first time they're needed (Settings › Engines).</p></details>
         <details><summary>Can I use a model that isn't in Discover?</summary>
           <p>Yes. Press <b>+ Add a model</b> in Library. You can paste a Hugging Face link and it downloads, choose files already on your Mac and they're moved into <code>~/Models</code>, or make a folder by hand. The window walks you through each, and the <a href="#" data-link="https://github.com/ajokhai/model-launcher/blob/main/docs/models.md#bring-your-own-model">docs</a> have a full example. Any GGUF chat model that llama.cpp supports works (Mistral, Phi, DeepSeek, Llama, Qwen and more), as do Whisper models and Stable Diffusion GGUF or safetensors files.</p></details>
+        <details><summary>Can models use the internet?</summary>
+          <p>Yes, chat models can search the web and read pages. In a chat, the model calls <b>web_search</b> or <b>web_open_page</b> when a question needs something current, and you see each call. Searches go to DuckDuckGo with no account; pages are read as plain text, and addresses on your Mac or local network are blocked. Turn it off in <b>Settings › Internet access</b> to keep models fully offline.</p></details>
         <details><summary>Where are my models?</summary>
           <p>All in <code>~/Models</code>: <code>Chat</code>, <code>Voice</code> and <code>Image</code>, with one folder per model. To add a model from elsewhere, put its files in a new folder there (for example <code>~/Models/Chat/My Model/</code>). A <code>.gguf</code> plus an optional <code>mmproj-*.gguf</code> makes a chat model; a <code>ggml-*.bin</code> in Voice is a Whisper model. To remove one, use the trash button or delete its folder.</p></details>
         <details><summary>How does memory management work?</summary>

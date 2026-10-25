@@ -56,5 +56,7 @@ These are what the app's window and the MCP server use.
 | `POST /api/settings {...}` | Change settings (any subset of the fields in `/api/status`) |
 | `POST /api/engines/install {"engine"}` | Install `llama_server`, `llama_tts`, `whisper_cli` or `sd_cli` |
 | `POST /api/reveal {"id"}` | Show a model's folder in Finder |
+| `POST /api/web/search {"query","max_results"?}` | Web search results (title, url, snippet). Refused when Internet access is off |
+| `POST /api/web/fetch {"url"}` | A web page as plain text. Local and private addresses are refused |
 
 Errors look like OpenAI's: `{"error": {"message": "..."}}`, with the reason in plain words (for example, that a model needs more memory than your budget allows).

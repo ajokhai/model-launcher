@@ -7,6 +7,7 @@ pub mod gateway;
 pub mod library;
 pub mod settings;
 pub mod system;
+pub mod web;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;

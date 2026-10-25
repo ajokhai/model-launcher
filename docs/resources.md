@@ -13,6 +13,7 @@ Local models are memory hungry. Model Launcher keeps them inside limits you set 
 | CPU threads | Auto (all cores but two) | Threads each engine may use. Fewer leaves more for your other apps. |
 | Use the GPU | On | Runs models on the GPU with Metal. Off is slower and leaves the GPU free. |
 | Low priority | On | Runs engines at a lower CPU priority so whatever you're doing comes first. |
+| Internet access | On | Lets chat models search the web (DuckDuckGo, no account) and read pages, through the `web_search` and `web_open_page` tools. Off keeps them fully offline; loaded models reload to apply the change. |
 
 ## How it's enforced
 
