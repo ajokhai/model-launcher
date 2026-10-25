@@ -16,6 +16,7 @@
       <button data-tab="library" class="on">Library</button>
       <button data-tab="discover">Discover</button>
       <button data-tab="studio">Studio</button>
+      <button data-tab="bench">Benchmark</button>
       <button data-tab="connect">Connect</button>
       <button data-tab="settings">Settings</button>
       <button data-tab="help">Help</button>
@@ -108,6 +109,15 @@
           <div class="gallery" id="vid-gallery"></div>
         </div>
       </div>
+    </section>
+
+    <!-- Benchmark -->
+    <section class="page" id="page-bench">
+      <div class="page-head"><div><h1>Benchmark</h1><p class="sub">Can your model use a computer? It gets 10 minutes to open Chrome, go to x.com and post a tweet, using <a href="#" data-link="https://github.com/ajokhai/computer-use-lite">Computer Use</a> to see and click. Then you check X, and get a report to share.</p></div></div>
+      <div id="bench-setup"></div>
+      <div id="bench-run"></div>
+      <h2 class="section">Past runs</h2>
+      <div id="bench-history"></div>
     </section>
 
     <!-- Connect -->
@@ -220,6 +230,8 @@
           <p>Engines are installed for you the first time they're needed (Settings › Engines).</p></details>
         <details><summary>Can I use a model that isn't in Discover?</summary>
           <p>Yes. Press <b>+ Add a model</b> in Library. You can paste a Hugging Face link and it downloads, choose files already on your Mac and they're moved into <code>~/Models</code>, or make a folder by hand. The window walks you through each, and the <a href="#" data-link="https://github.com/ajokhai/model-launcher/blob/main/docs/models.md#bring-your-own-model">docs</a> have a full example. Any GGUF chat model that llama.cpp supports works (Mistral, Phi, DeepSeek, Llama, Qwen and more), as do Whisper models and Stable Diffusion GGUF or safetensors files.</p></details>
+        <details><summary>How do I benchmark a model?</summary>
+          <p>Open <b>Benchmark</b>, pick a chat model and press <b>Run the test</b>. With <a href="#" data-link="https://github.com/ajokhai/computer-use-lite">Computer Use</a> installed, the model gets 10 minutes to open Chrome, go to x.com and post a tweet. Then you check X and say whether it posted, and you can share the report on X or as a GitHub issue. Reports are saved in <code>~/Documents/Computer Use Benchmarks</code>, the same place Computer Use's <code>scripts/benchmark.py</code> uses, so runs from both show up together.</p></details>
         <details><summary>A model says it needs more RAM. Can I run it anyway?</summary>
           <p>Yes. Press <b>Chat</b> and choose <b>Run anyway</b> when it says there isn't enough memory. Your other chat models are unloaded first, and llama.cpp puts as much of the model on the GPU as fits and the rest on the CPU. It works, but expect slower replies, and other apps may slow down while it's loaded. The memory watchdog leaves a model you ran anyway alone, so unload it when you're done (or let it unload when idle).</p></details>
         <details><summary>Can I use an external SSD for models, or as extra RAM?</summary>

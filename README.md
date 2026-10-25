@@ -28,6 +28,10 @@ The first time a model needs an engine, Model Launcher installs it: llama.cpp an
 
 **Linux (preview):** download the `.deb` (Ubuntu, Debian) or the `.AppImage` (any distro) from the same page. Engines come from the official llama.cpp, whisper.cpp and stable-diffusion.cpp releases: the Vulkan builds when your GPU supports Vulkan (NVIDIA, AMD or Intel), the CPU builds otherwise. Voice input needs `ffmpeg`, and the file picker uses `zenity` or `kdialog`. Settings, engines and logs live in `~/.local/share/Model Launcher`, and models in `~/Models` as on the Mac. The RAM budget covers system RAM; a separate GPU's video memory is managed by llama.cpp. The Linux build is new, so please [open an issue](https://github.com/ajokhai/model-launcher/issues) if something's off.
 
+## Benchmark a model
+
+The **Benchmark** page tests whether a model can use a computer: with [Computer Use](https://github.com/ajokhai/computer-use-lite) installed, the model gets 10 minutes to open Chrome, go to x.com and post a tweet. You check X, and the report (model, Mac, time, every tool call) is saved to `~/Documents/Computer Use Benchmarks`, ready to share on X or as an issue. Prefer the terminal? Computer Use's `python3 scripts/benchmark.py` does the same and writes to the same folder. See [the guide](https://github.com/ajokhai/computer-use-lite/blob/main/docs/benchmark.md).
+
 ## Use it from other apps
 
 **API** (OpenAI-compatible, on this Mac only):

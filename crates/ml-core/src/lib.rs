@@ -1,5 +1,6 @@
 //! Model Launcher's core: everything except the window. The app embeds it; it can also run headless.
 
+pub mod bench;
 pub mod catalog;
 pub mod download;
 pub mod engines;
@@ -20,6 +21,7 @@ pub struct Core {
     pub engines: Arc<engines::Engines>,
     pub downloads: Arc<download::Downloads>,
     pub mover: Arc<storage::Mover>,
+    pub bench: Arc<bench::Bench>,
 }
 
 impl Core {
@@ -34,7 +36,7 @@ impl Core {
         for pid in engines::reap_orphan() {
             engines.note(format!("Stopped a model server left running by the last session (pid {pid})"));
         }
-        Arc::new(Core { settings, engines, downloads: Default::default(), mover: Default::default() })
+        Arc::new(Core { settings, engines, downloads: Default::default(), mover: Default::default(), bench: Default::default() })
     }
 
     /// Serves the API and runs the watchdog until the process ends.

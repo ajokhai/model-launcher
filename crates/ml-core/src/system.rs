@@ -147,3 +147,62 @@ pub fn available_memory_gb() -> f64 {
 pub fn process_memory_gb(pid: u32) -> Option<f64> {
     proc_kb(&format!("/proc/{pid}/status"), "VmRSS")
 }
+
+#[cfg(target_os = "macos")]
+fn sysctl_string(key: &std::ffi::CStr) -> Option<String> {
+    let mut len = 0usize;
+    if unsafe { libc::sysctlbyname(key.as_ptr(), std::ptr::null_mut(), &mut len, std::ptr::null_mut(), 0) } != 0 || len == 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; len];
+    if unsafe { libc::sysctlbyname(key.as_ptr(), buf.as_mut_ptr() as *mut libc::c_void, &mut len, std::ptr::null_mut(), 0) } != 0 {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&buf[..len]).trim_end_matches('\0').to_string())
+}
+
+/// "Apple M1 Pro", for benchmark reports.
+#[cfg(target_os = "macos")]
+pub fn chip_name() -> String {
+    sysctl_string(c"machdep.cpu.brand_string").unwrap_or_else(|| "Apple silicon".into())
+}
+
+#[cfg(target_os = "macos")]
+pub fn os_version() -> String {
+    sysctl_string(c"kern.osproductversion").unwrap_or_default()
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGGetActiveDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> i32;
+}
+
+/// Displays connected right now.
+#[cfg(target_os = "macos")]
+pub fn display_count() -> u32 {
+    let mut count = 0u32;
+    let rc = unsafe { CGGetActiveDisplayList(0, std::ptr::null_mut(), &mut count) };
+    if rc == 0 { count.max(1) } else { 1 }
+}
+
+#[cfg(target_os = "linux")]
+pub fn chip_name() -> String {
+    std::fs::read_to_string("/proc/cpuinfo")
+        .ok()
+        .and_then(|t| t.lines().find(|l| l.starts_with("model name")).and_then(|l| l.split(':').nth(1)).map(|s| s.trim().to_string()))
+        .unwrap_or_else(|| std::env::consts::ARCH.into())
+}
+
+#[cfg(target_os = "linux")]
+pub fn os_version() -> String {
+    std::fs::read_to_string("/etc/os-release")
+        .ok()
+        .and_then(|t| t.lines().find(|l| l.starts_with("PRETTY_NAME=")).map(|l| l[12..].trim_matches('"').to_string()))
+        .unwrap_or_else(|| "Linux".into())
+}
+
+#[cfg(target_os = "linux")]
+pub fn display_count() -> u32 {
+    1
+}

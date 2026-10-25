@@ -244,3 +244,11 @@ a { color: var(--text); text-decoration: underline; text-decoration-color: var(-
 #modal-text { white-space: pre-line; }
 .drive { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .drive:last-of-type { margin-bottom: 10px; }
+.bench-start { display: flex; flex-direction: column; gap: 14px; margin-bottom: 14px; }
+.bench-notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; display: grid; gap: 4px; }
+.bench-log { margin: 12px 0 8px; padding: 12px 14px; border-radius: 10px; background: rgba(127,127,127,.12); font: 12px/1.55 "SF Mono", Menlo, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto; }
+.bench-ask { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.bench-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bench-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; }
+.bench-table td { padding: 8px; border-top: 1px solid var(--line); }
+#bench-run .card { margin-bottom: 14px; }

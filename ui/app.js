@@ -94,6 +94,8 @@ $('tabs').onclick = (e) => {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b === e.target));
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('on', p.id === 'page-' + tab));
   if (tab === 'connect') renderConnect();
+  state.tab = tab;
+  if (tab === 'bench') refreshBench();
 };
 $('filters').onclick = (e) => {
   if (!e.target.dataset.kind) return;
@@ -112,6 +114,7 @@ async function refresh() {
     state.library = library;
     if (!state.catalog.length || downloadsChanged) state.catalog = await api('/api/catalog');
     render();
+    if (state.tab === 'bench') refreshBench();
   } catch (e) {
     $('banner').innerHTML = `<div class="card"><span class="live loading"></span><div>Starting Model Launcher…</div></div>`;
   }
@@ -265,6 +268,80 @@ async function download(id) {
   } catch (e) { toast(e.message, true); }
 }
 async function cancelDl(id) { await api('/api/download/cancel', { body: { id } }); refresh(); }
+// ---------- benchmark ----------
+async function refreshBench() {
+  try { state.bench = await api('/api/bench'); } catch { return; }
+  renderBench();
+}
+function renderBench() {
+  const b = state.bench;
+  if (!b) return;
+  const cur = b.current;
+  const chats = state.library.filter((m) => m.kind === 'chat');
+  if (!b.available) {
+    $('bench-setup').innerHTML = `<div class="card"><div class="card-title">Install Computer Use first</div><p class="hint">The benchmark uses Computer Use to see the screen and click. Download it, drag it to Applications, open it once, and in its <b>Settings</b> allow <b>Accessibility</b> and <b>Screen Recording</b>.</p><br><button class="btn primary" data-link="https://github.com/ajokhai/computer-use-lite/releases">Get Computer Use</button></div>`;
+  } else if (!chats.length) {
+    $('bench-setup').innerHTML = `<div class="card"><div class="card-title">Get a chat model first</div><p class="hint">Download one in Discover. Models that read images (Qwen3-VL, Gemma 3, InternVL3) are the interesting ones here.</p></div>`;
+  } else if (!cur || !cur.running) {
+    const keep = $('bench-model')?.value;
+    $('bench-setup').innerHTML = `<div class="card bench-start">
+      <label class="field"><span>Model</span><select id="bench-model">${chats.map((m) => `<option value="${esc(m.id)}">${esc(m.name)} · ${gb(m.size_gb)}${m.vision ? ' · reads images' : ''}</option>`).join('')}</select></label>
+      <ul class="bench-notes"><li>Be signed in to X in Chrome. The test posts a <b>real tweet</b> from that account.</li>
+      <li>It drives this Mac for up to 10 minutes, so leave the mouse and keyboard alone.${b.displays > 1 ? ' It stays on your built-in display; your other screen is left alone.' : ''}</li>
+      <li>Stop it any time: press <b>Escape three times</b>, or move the mouse hard into a screen corner.</li></ul>
+      <div class="row"><button class="btn primary" onclick="startBench()">Run the test</button><span class="spacer"></span><button class="btn ghost" onclick="api('/api/bench/reveal', { body: {} })">Show reports in Finder</button></div></div>`;
+    if (keep && chats.some((m) => m.id === keep)) $('bench-model').value = keep;
+  } else {
+    $('bench-setup').innerHTML = '';
+  }
+  if (cur) {
+    const done = !cur.running;
+    const ask = done && !cur.verdict;
+    $('bench-run').innerHTML = `<div class="card ${cur.running ? 'dark' : ''}">
+      <div class="row"><span class="live ${cur.running ? 'loading' : ''}"></span><b>${esc(cur.model_name)}</b><span class="muted">${cur.running ? `running · ${cur.actions} tool calls` : `${cur.seconds} s · ${cur.actions} tool calls`}</span><span class="spacer"></span>${cur.running ? '<button class="btn" onclick="api(\'/api/bench/stop\', { body: {} })">Stop</button>' : ''}</div>
+      <pre class="bench-log">${esc(cur.log.slice(-14).join('\n') || 'Starting…')}</pre>
+      ${done ? `<p class="hint">${esc(cur.result)}</p>` : ''}
+      ${ask ? `<div class="bench-ask"><b>Open your X profile. Did the tweet post?</b><div class="row"><button class="btn primary" onclick="benchVerdict('pass')">Yes, it's there</button><button class="btn" onclick="benchVerdict('fail')">No</button><button class="btn ghost" data-link="https://x.com">Open X</button></div><small class="note">A model saying "done" isn't a pass: only the tweet on your profile counts.</small></div>` : ''}
+      ${cur.verdict ? `<div class="bench-ask"><b>${cur.verdict === 'pass' ? 'Passed ✅' : 'Failed ❌'}. Saved to your reports.</b><div class="row"><button class="btn primary" onclick="shareBench('x')">Share on X</button><button class="btn" onclick="shareBench('issue')">Open an issue with the report</button><button class="btn ghost" onclick="copyBench()">Copy report</button></div></div>` : ''}
+    </div>`;
+  } else {
+    $('bench-run').innerHTML = '';
+  }
+  const rows = b.history || [];
+  $('bench-history').innerHTML = rows.length ? `<div class="card"><table class="bench-table"><tr><th>When</th><th>Model</th><th>Mac</th><th>Result</th><th>Time</th><th>Calls</th></tr>${rows.slice(0, 30).map((r) => `<tr><td>${esc((r.at || '').slice(0, 16))}</td><td>${esc(r.model_name || r.model)}</td><td>${r.machine ? `${r.machine.ram_gb} GB` : ''}</td><td>${r.verdict === 'pass' ? '<span class="badge great">Pass</span>' : r.verdict === 'fail' ? '<span class="badge too">Fail</span>' : '<span class="badge">Not checked</span>'}</td><td>${r.seconds} s</td><td>${r.actions}</td></tr>`).join('')}</table></div>` : '<p class="hint">No runs yet. Results from Computer Use\'s <code>scripts/benchmark.py</code> show up here too.</p>';
+}
+async function startBench() {
+  const id = $('bench-model').value;
+  try {
+    await ensureEngine('chat');
+    toast('Loading the model…');
+    try { await api('/api/bench/start', { body: { id } }); } catch (e) {
+      if (e.status !== 507) throw e;
+      if (!(await confirmDelete('Run it anyway?', `${e.message.replace(/ (Raise|Close).*$/, '')}\n\nRunning anyway unloads your other chat models and puts what doesn't fit on the GPU onto the CPU. It works, but slower.`, 'Run anyway', false))) return;
+      await api('/api/bench/start', { body: { id, force: true } });
+    }
+    refreshBench();
+  } catch (e) { toast(e.message, true); }
+}
+async function benchVerdict(verdict) {
+  try { state.benchReport = (await api('/api/bench/verdict', { body: { verdict } })).report; refreshBench(); } catch (e) { toast(e.message, true); }
+}
+function benchSummary() {
+  const c = state.bench.current, ram = Math.round(state.status.system.ram_total_gb);
+  return { c, ram, verdict: c.verdict === 'pass' ? 'passed' : 'failed' };
+}
+function shareBench(where) {
+  const { c, ram, verdict } = benchSummary();
+  const repo = 'https://github.com/ajokhai/computer-use-lite';
+  const url = where === 'x'
+    ? 'https://x.com/intent/post?' + new URLSearchParams({ text: `${c.model_name} ${verdict} the Computer Use tweet test on my ${ram} GB Mac: ${c.seconds} s, ${c.actions} tool calls. Tested with Model Launcher. ${repo}` })
+    : `${repo}/issues/new?` + new URLSearchParams({ title: `Benchmark: ${c.model_name} ${verdict} (${ram} GB Mac)`, body: (state.benchReport || '').slice(0, 6000) });
+  if (tauri) tauri.invoke('open_url', { url }); else window.open(url);
+}
+async function copyBench() {
+  try { await navigator.clipboard.writeText(state.benchReport || ''); toast('Report copied'); } catch { toast("Couldn't copy; the report is in Finder", true); }
+}
+
 function tryStudio() { document.querySelector('[data-tab=studio]').click(); }
 $('open-models').onclick = (e) => { e.preventDefault(); reveal(); };
 document.addEventListener('click', (e) => {

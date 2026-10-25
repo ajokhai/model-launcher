@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Command;
 
+use crate::bench;
 use crate::catalog::{self, Kind};
 use crate::download;
 use crate::engines::{estimate_gb, Engine, NotEnoughMemory};
@@ -93,6 +94,11 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/api/settings", post(update_settings))
         .route("/api/engines/install", post(install_engine))
         .route("/api/reveal", post(reveal))
+        .route("/api/bench", get(bench_status))
+        .route("/api/bench/start", post(bench_start))
+        .route("/api/bench/stop", post(bench_stop))
+        .route("/api/bench/verdict", post(bench_verdict))
+        .route("/api/bench/reveal", post(bench_reveal))
         .route("/api/drives", get(drives))
         .route("/api/models/move", post(move_models))
         .route("/api/web/search", post(web_search))
@@ -599,6 +605,56 @@ async fn save_settings(core: &Arc<Core>, patch: Value) -> anyhow::Result<Setting
         tokio::spawn(async move { core.engines.reload_chat().await });
     }
     Ok(new)
+}
+
+async fn bench_status(State(core): State<Arc<Core>>) -> Json<Value> {
+    Json(json!({
+        "available": bench::available(),
+        "current": core.bench.current(),
+        "history": bench::history(),
+        "folder": bench::results_dir(),
+        "displays": system::display_count(),
+    }))
+}
+
+/// Loads the model if needed ("force" runs it past the budget) and starts the tweet test.
+async fn bench_start(State(core): State<Arc<Core>>, Json(req): Json<LaunchReq>) -> R<Json<Value>> {
+    let m = resolve(&core, Some(&req.id), Kind::Chat).await?;
+    let port = core.engines.load_chat(&m, req.force).await?;
+    core.bench.start(core.engines.clone(), m, port)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn bench_stop(State(core): State<Arc<Core>>) -> Json<Value> {
+    core.bench.stop();
+    Json(json!({ "ok": true }))
+}
+
+#[derive(Deserialize)]
+struct VerdictReq {
+    verdict: String,
+}
+
+/// The person's check of X ("pass" or "fail"); saves the run and its report.
+async fn bench_verdict(State(core): State<Arc<Core>>, Json(req): Json<VerdictReq>) -> R<Json<Value>> {
+    if req.verdict != "pass" && req.verdict != "fail" {
+        bail_api("verdict is pass or fail")?;
+    }
+    let s = settings(&core).await;
+    let m = core.bench.current().and_then(|r| library::find(&s, &r.model_id));
+    let path = core.bench.finish(&req.verdict, m.as_ref())?;
+    let report = std::fs::read_to_string(&path)?;
+    Ok(Json(json!({ "ok": true, "path": path, "report": report })))
+}
+
+async fn bench_reveal() -> R<Json<Value>> {
+    let dir = bench::results_dir();
+    std::fs::create_dir_all(&dir)?;
+    #[cfg(target_os = "macos")]
+    Command::new("/usr/bin/open").arg(&dir).status().await?;
+    #[cfg(target_os = "linux")]
+    Command::new("xdg-open").arg(&dir).status().await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn drives(State(core): State<Arc<Core>>) -> Json<Value> {
