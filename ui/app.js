@@ -168,9 +168,9 @@ function modelCard(m) {
 
 function renderPending() {
   const dl = state.status?.downloads || {};
-  const catalogIds = new Set(state.catalog.map((m) => m.id));
-  const rows = Object.entries(dl).filter(([id, d]) => !catalogIds.has(id) && (!d.finished || d.error));
-  $('pending').innerHTML = rows.map(([id, d]) => `<div class="card pending-row"><div style="flex:1"><b>${esc(id)}</b>
+  const names = new Map(state.catalog.map((m) => [m.id, m.name]));
+  const rows = Object.entries(dl).filter(([, d]) => !d.finished || d.error);
+  $('pending').innerHTML = rows.map(([id, d]) => `<div class="card pending-row"><div style="flex:1"><b>Downloading ${esc(names.get(id) || id)}</b>
     ${d.error ? `<div class="muted" style="color:var(--red)">${esc(d.error)}</div>` : `<div class="progress"><i style="width:${d.total_gb ? (100 * d.done_gb / d.total_gb).toFixed(1) : 2}%"></i></div><div class="muted">${gb(d.done_gb)} of ${d.total_gb > .01 ? gb(d.total_gb) : '…'}</div>`}</div>
     ${d.error ? '' : `<button class="btn icon-only" onclick="cancelDl('${esc(id)}')">Cancel</button>`}</div>`).join('');
 }
