@@ -47,7 +47,7 @@
       <div class="page-head">
         <div>
           <h1>Discover</h1>
-          <p class="sub">Open models picked to run well on a Mac, downloaded straight from <a href="#" data-link="https://huggingface.co">huggingface.co</a>. Each card links its source and license; the badge says how it fits your memory budget. Want one that isn't here? Use <b>+ Add a model</b> in Library.</p>
+          <p class="sub">Open models picked to run well on a Mac, downloaded straight from <a href="#" data-link="https://huggingface.co">huggingface.co</a>. Each card links its source and license; the badge says how it fits your memory budget. Want one that isn't here? <a href="#" onclick="openAdd(); return false">Add your own model</a>.</p>
         </div>
         <div class="filters" id="filters">
           <button data-kind="all" class="on">All</button>
@@ -58,6 +58,7 @@
         </div>
       </div>
       <div class="grid" id="catalog"></div>
+      <div class="add-card"><div><b>Not finding what you want?</b><div class="muted">Add any model from Hugging Face or another site, or files you already have. Model Launcher walks you through it.</div></div><button class="btn primary" onclick="openAdd()">+ Add your own</button></div>
     </section>
 
     <!-- Studio -->

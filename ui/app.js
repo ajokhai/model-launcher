@@ -179,14 +179,20 @@ function renderLibrary() {
   renderPending();
   const lib = state.library;
   if (!lib.length) {
-    $('library').innerHTML = `<div class="empty"><h3>No models yet</h3><p>Get one from Discover. Look for <span class="badge great">Runs great</span>.</p><br><button class="btn primary" onclick="document.querySelector('[data-tab=discover]').click()">Discover models</button></div>`;
+    $('library').innerHTML = `<div class="empty"><h3>No models yet</h3><p>Get one from Discover. Look for <span class="badge great">Runs great</span>.</p><br><button class="btn primary" onclick="document.querySelector('[data-tab=discover]').click()">Discover models</button> <button class="btn" onclick="openAdd()">Add your own model</button></div>`;
     return;
   }
   const groups = [['Chat', (m) => m.kind === 'chat'], ['Voice', (m) => m.kind === 'transcribe' || m.kind === 'speak'], ['Image', (m) => m.kind === 'image'], ['Video', (m) => m.kind === 'video']];
   $('library').innerHTML = groups
     .map(([name, f]) => { const ms = lib.filter(f); return ms.length ? `<h2 class="section">${name}</h2><div class="grid">${ms.map(modelCard).join('')}</div>` : ''; })
-    .join('');
+    .join('') + addCard();
 }
+
+/** The way in for models that aren't in Discover, at the end of Library and Discover. */
+function addCard() {
+  return `<div class="add-card"><div><b>Add your own model</b><div class="muted">From a Hugging Face link, files already on this Mac, or a folder you make yourself. Any GGUF chat model, Whisper or Stable Diffusion file works.</div></div><button class="btn primary" onclick="openAdd()">+ Add a model</button></div>`;
+}
+function openAdd() { $('add').hidden = false; }
 
 function renderCatalog() {
   const f = state.filter;
@@ -255,7 +261,7 @@ document.addEventListener('click', (e) => {
 
 // ---------- add a model ----------
 let addWay = 'link', picked = [];
-$('add-open').onclick = () => { $('add').hidden = false; };
+$('add-open').onclick = openAdd;
 $('add-close').onclick = () => { $('add').hidden = true; };
 $('add-reveal').onclick = (e) => { e.preventDefault(); reveal(); };
 $('add-tabs').onclick = (e) => {
